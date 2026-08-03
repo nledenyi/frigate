@@ -184,6 +184,42 @@ birdseye:
 </TabItem>
 </ConfigTabs>
 
+### Fixed Birdseye Layout
+
+By default Birdseye packs the active cameras automatically, which means a camera's position and size change as cameras come and go, and every camera gets the same amount of the canvas. Setting the layout mode to `fixed` places each camera on a grid instead, so a camera always appears in the same place and can be given more room than its neighbors.
+
+The grid is defined once with `cols` and `rows`, and each camera is placed with `cell: [column, row]`, counted from the top left starting at zero. A camera can cover several cells with `span: [columns, rows]`.
+
+```yaml {3-6,11-13,16-17}
+birdseye:
+  enabled: True
+  # a fixed layout only fills every cell if all cameras are always shown
+  mode: continuous
+  layout:
+    mode: fixed
+    cols: 4
+    rows: 4
+
+cameras:
+  front:
+    birdseye:
+      cell: [0, 0]
+      span: [2, 2]
+  back:
+    birdseye:
+      cell: [2, 0]
+```
+
+The example above gives `front` a large 2x2 tile in the top left corner and `back` a single cell to the right of it.
+
+Notes on fixed layouts:
+
+- A camera with no `cell` is left out of the view, and so is a camera whose cell and span fall outside the grid or overlap another camera. Each case is logged as a warning at startup.
+- Cells belonging to cameras that are not currently shown stay black, so a fixed layout is normally used with `mode: continuous`.
+- `layout.max_cameras` is ignored, since which camera goes where is already decided by the configuration.
+- Tiles keep their camera's aspect ratio and are letterboxed inside their cell.
+- Grid lines are rounded to keep tiles aligned for YUV420, so tiles can differ from each other by a pixel or two.
+
 ### Birdseye Scaling
 
 By default birdseye tries to fit 2 cameras in each row and then double in size until a suitable layout is found. The scaling can be configured with a value between 1.0 and 5.0 depending on use case.

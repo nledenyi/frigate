@@ -600,6 +600,18 @@
     "layout": {
       "label": "Layout",
       "description": "Layout options for the Birdseye composition.",
+      "mode": {
+        "label": "Layout mode",
+        "description": "How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span."
+      },
+      "cols": {
+        "label": "Grid columns",
+        "description": "Number of grid columns when the layout mode is 'fixed'."
+      },
+      "rows": {
+        "label": "Grid rows",
+        "description": "Number of grid rows when the layout mode is 'fixed'."
+      },
       "scaling_factor": {
         "label": "Scaling factor",
         "description": "Scaling factor used by the layout calculator (range 1.0 to 5.0)."

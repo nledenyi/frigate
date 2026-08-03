@@ -8,6 +8,7 @@ __all__ = [
     "BirdseyeCameraConfig",
     "BirdseyeConfig",
     "BirdseyeLayoutConfig",
+    "BirdseyeLayoutModeEnum",
     "BirdseyeModeEnum",
 ]
 
@@ -26,7 +27,31 @@ class BirdseyeModeEnum(str, Enum):
         return list(cls)[index]
 
 
+class BirdseyeLayoutModeEnum(str, Enum):
+    auto = "auto"
+    fixed = "fixed"
+
+
 class BirdseyeLayoutConfig(FrigateBaseModel):
+    mode: BirdseyeLayoutModeEnum = Field(
+        default=BirdseyeLayoutModeEnum.auto,
+        title="Layout mode",
+        description="How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span.",
+    )
+    cols: int = Field(
+        default=4,
+        title="Grid columns",
+        description="Number of grid columns when the layout mode is 'fixed'.",
+        ge=1,
+        le=16,
+    )
+    rows: int = Field(
+        default=4,
+        title="Grid rows",
+        description="Number of grid rows when the layout mode is 'fixed'.",
+        ge=1,
+        le=16,
+    )
     scaling_factor: float = Field(
         default=2.0,
         title="Scaling factor",
@@ -112,4 +137,14 @@ class BirdseyeCameraConfig(BaseModel):
         default=0,
         title="Position",
         description="Numeric position controlling the camera's ordering in the Birdseye layout.",
+    )
+    cell: tuple[int, int] | None = Field(
+        default=None,
+        title="Grid cell",
+        description="Grid cell [column, row] this camera is placed in when the Birdseye layout mode is 'fixed'; zero-based, top-left origin.",
+    )
+    span: tuple[int, int] = Field(
+        default=(1, 1),
+        title="Grid span",
+        description="How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'.",
     )

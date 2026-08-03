@@ -77,6 +77,14 @@
     "order": {
       "label": "Position",
       "description": "Numeric position controlling the camera's ordering in the Birdseye layout."
+    },
+    "cell": {
+      "label": "Grid cell",
+      "description": "Grid cell [column, row] this camera is placed in when the Birdseye layout mode is 'fixed'; zero-based, top-left origin."
+    },
+    "span": {
+      "label": "Grid span",
+      "description": "How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'."
     }
   },
   "detect": {
