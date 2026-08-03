@@ -190,6 +190,21 @@ By default Birdseye packs the active cameras automatically, which means a camera
 
 The grid is defined once with `cols` and `rows`, and each camera is placed with `cell: [column, row]`, counted from the top left starting at zero. A camera can cover several cells with `span: [columns, rows]`.
 
+<ConfigTabs>
+<TabItem value="ui">
+
+Navigate to <NavPath path="Settings > System > Birdseye" /> and set **Layout > Layout mode** to `Fixed grid`.
+
+| Field                  | Description                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| **Columns** / **Rows** | Size of the grid the cameras are placed on                                                  |
+| **Camera placement**   | Which camera fills each cell; neighboring cells with the same camera become one larger tile |
+
+Placement is saved as it is edited, since it is stored on the cameras rather than in this section.
+
+</TabItem>
+<TabItem value="yaml">
+
 ```yaml {3-6,11-13,16-17}
 birdseye:
   enabled: True
@@ -212,6 +227,9 @@ cameras:
 
 The example above gives `front` a large 2x2 tile in the top left corner and `back` a single cell to the right of it.
 
+</TabItem>
+</ConfigTabs>
+
 Notes on fixed layouts:
 
 - A camera with no `cell` is left out of the view, and so is a camera whose cell and span fall outside the grid or overlap another camera. Each case is logged as a warning at startup.
@@ -225,6 +243,19 @@ Notes on fixed layouts:
 A fixed layout keeps a camera in the same cell whether or not it is being shown, which leaves holes when Birdseye is set to `motion` or `objects`. The `dynamic` layout mode instead draws a layout for each number of cameras and picks the one matching how many cameras are being shown right now, so the view always fills the canvas.
 
 Each layout is drawn as a list of rows, one character per cell. A letter marks the slot the cell belongs to, and `.` leaves the cell empty. Slots are filled in alphabetical order with the cameras being shown, ordered by their `order`, so cameras keep their relative positions as the view changes.
+
+<ConfigTabs>
+<TabItem value="ui">
+
+Navigate to <NavPath path="Settings > System > Birdseye" /> and set **Layout > Layout mode** to `Dynamic`.
+
+| Field                 | Description                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| **Layouts**           | One drawn grid per number of cameras being shown; each cell picks the slot it belongs to |
+| **Layout dwell time** | Seconds a layout is kept before the view is laid out again                               |
+
+</TabItem>
+<TabItem value="yaml">
 
 ```yaml {3-5,7-13}
 birdseye:
@@ -242,6 +273,9 @@ birdseye:
 ```
 
 The layout for six cameras above gives the first camera a 2x2 tile in the top left corner and lays the other five out around it.
+
+</TabItem>
+</ConfigTabs>
 
 Notes on dynamic layouts:
 

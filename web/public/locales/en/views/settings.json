@@ -1853,6 +1853,31 @@
       "reorderHandle": "Drag to reorder",
       "saving": "Saving…",
       "saved": "Saved"
+    },
+    "layoutBuilder": {
+      "fixed": {
+        "label": "Camera placement",
+        "description": "Choose which camera fills each cell. Give a camera several neighboring cells to make its tile larger. Placement is saved as you edit it."
+      },
+      "emptyCell": "Empty",
+      "notARectangle": "These cells do not form a rectangle: {{slots}}",
+      "columns": "Columns",
+      "rows": "Rows",
+      "dynamic": {
+        "label": "Layouts",
+        "description": "Draw a layout for each number of cameras being shown. Slots are filled in order with the cameras being shown."
+      },
+      "addLayout": "Add layout",
+      "cameraCount": "{{count}} cameras",
+      "removeLayout": "Remove layout",
+      "missingSlots": "These slots are not on the grid yet: {{slots}}",
+      "cameraCount_one": "{{count}} camera",
+      "cameraCount_other": "{{count}} cameras"
+    },
+    "layoutMode": {
+      "auto": "Automatic",
+      "fixed": "Fixed grid",
+      "dynamic": "Dynamic"
     }
   },
   "retainMode": {

@@ -29,6 +29,15 @@ const birdseye: SectionConfigOverrides = {
           enumI18nPrefix: "birdseye.trackingMode",
         },
       },
+      // placement is painted on the grid in the global Birdseye settings, the
+      // same way the camera order is, so the values behind it are kept but
+      // not shown as fields
+      cell: {
+        "ui:widget": "hidden",
+      },
+      span: {
+        "ui:widget": "hidden",
+      },
     },
   },
   global: {
@@ -50,6 +59,10 @@ const birdseye: SectionConfigOverrides = {
       "width",
       "height",
       "quality",
+      "layout.mode",
+      "layout.cols",
+      "layout.rows",
+      "layout.layouts",
       "layout.scaling_factor",
       "idle_heartbeat_fps",
     ],
@@ -57,6 +70,25 @@ const birdseye: SectionConfigOverrides = {
       mode: {
         "ui:size": "xs",
         "ui:after": { render: "BirdseyeCameraReorder" },
+      },
+      layout: {
+        mode: {
+          "ui:size": "xs",
+          "ui:options": {
+            enumI18nPrefix: "birdseye.layoutMode",
+          },
+          "ui:after": { render: "BirdseyeLayoutBuilder" },
+        },
+      },
+      // the grid behind these is painted by BirdseyeLayoutBuilder
+      "layout.cols": {
+        "ui:widget": "hidden",
+      },
+      "layout.rows": {
+        "ui:widget": "hidden",
+      },
+      "layout.layouts": {
+        "ui:widget": "hidden",
       },
     },
   },

@@ -10,9 +10,23 @@ export interface UiConfig {
   unit_system?: "metric" | "imperial";
 }
 
+export type BirdseyeLayoutMode = "auto" | "fixed" | "dynamic";
+
+export interface BirdseyeLayoutConfig {
+  mode: BirdseyeLayoutMode;
+  cols: number;
+  rows: number;
+  /** Rows of drawn cells, keyed by the number of cameras being shown */
+  layouts: Record<string, string[]>;
+  dwell: number;
+  scaling_factor: number;
+  max_cameras: number | null;
+}
+
 export interface BirdseyeConfig {
   enabled: boolean;
   height: number;
+  layout: BirdseyeLayoutConfig;
   mode: "objects" | "continuous" | "motion";
   quality: number;
   restream: boolean;
@@ -51,6 +65,10 @@ export interface CameraConfig {
     enabled: boolean;
     mode: "objects" | "continuous" | "motion";
     order: number;
+    /** Grid cell [column, row] when the birdseye layout mode is fixed */
+    cell: [number, number] | null;
+    /** How many [columns, rows] the camera covers on that grid */
+    span: [number, number];
   };
   detect: {
     annotation_offset: number;
