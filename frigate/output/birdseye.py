@@ -22,6 +22,7 @@ from frigate.config import (
     FfmpegConfig,
     FrigateConfig,
 )
+from frigate.config.camera.birdseye import parse_layout_slots
 from frigate.const import BASE_DIR, BIRDSEYE_PIPE, INSTALL_DIR, UPDATE_BIRDSEYE_LAYOUT
 from frigate.output.ws_auth import ws_has_camera_access
 from frigate.util.image import (
@@ -342,17 +343,34 @@ class BirdsEyeFrameManager:
         self.active_cameras: set[str] = set()
         self.layout_camera_order: list[str] = []
         self.last_output_time = 0.0
+        self.last_layout_time = 0.0
+        self.warned_layout_counts: set[int] = set()
 
-        if config.birdseye.layout.mode == BirdseyeLayoutModeEnum.fixed:
-            if config.birdseye.layout.max_cameras:
-                logger.warning(
-                    "birdseye layout.max_cameras is ignored when layout mode is 'fixed'"
-                )
-            if config.birdseye.mode != BirdseyeModeEnum.continuous:
-                logger.warning(
-                    "birdseye layout mode is 'fixed' with mode '%s', so cells belonging to inactive cameras will stay black",
-                    config.birdseye.mode.value,
-                )
+        layout_mode = config.birdseye.layout.mode
+
+        if layout_mode != BirdseyeLayoutModeEnum.auto and (
+            config.birdseye.layout.max_cameras
+        ):
+            logger.warning(
+                "birdseye layout.max_cameras is ignored when layout mode is '%s'",
+                layout_mode.value,
+            )
+
+        if (
+            layout_mode == BirdseyeLayoutModeEnum.fixed
+            and config.birdseye.mode != BirdseyeModeEnum.continuous
+        ):
+            logger.warning(
+                "birdseye layout mode is 'fixed' with mode '%s', so cells belonging to inactive cameras will stay black",
+                config.birdseye.mode.value,
+            )
+
+        if layout_mode == BirdseyeLayoutModeEnum.dynamic and (
+            not config.birdseye.layout.layouts
+        ):
+            logger.warning(
+                "birdseye layout mode is 'dynamic' but no layouts are drawn, so the automatic layout is used"
+            )
 
     def add_camera(self, cam: str) -> None:
         """Add a camera to self.cameras with the correct structure."""
@@ -531,8 +549,22 @@ class BirdsEyeFrameManager:
                 logger.debug("Birdseye camera order changed")
                 reset_layout = True
 
+            dwell = self.config.birdseye.layout.dwell
+            if (
+                reset_layout
+                and dwell
+                and self.camera_layout
+                and self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.dynamic
+                and datetime.datetime.now().timestamp() - self.last_layout_time < dwell
+            ):
+                # hold the layout, otherwise a camera coming or going moves
+                # every tile on the canvas
+                logger.debug("Holding the Birdseye layout for the dwell time")
+                reset_layout = False
+
             if reset_layout:
                 logger.debug("Resetting Birdseye layout...")
+                self.last_layout_time = datetime.datetime.now().timestamp()
                 self.clear_frame()
                 self.active_cameras = active_cameras
                 self.layout_camera_order = sorted_active_cameras
@@ -541,18 +573,20 @@ class BirdsEyeFrameManager:
                 # to pop elements in order
                 active_cameras_to_add = sorted_active_cameras
 
-                fixed = None
+                # a configured layout is already laid out, so there is nothing
+                # to pack and no coefficient to search for
+                configured = None
                 if self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.fixed:
-                    # a fixed layout is the same every time, so there is nothing
-                    # to pack and no coefficient to search for
-                    fixed = self.fixed_layout(active_cameras_to_add)
-                    if not fixed:
+                    configured = self.fixed_layout(active_cameras_to_add)
+                    if not configured:
                         logger.error(
                             "Fixed birdseye layout produced no tiles, falling back to the automatic layout"
                         )
+                elif self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.dynamic:
+                    configured = self.dynamic_layout(active_cameras_to_add)
 
-                if fixed:
-                    self.camera_layout = fixed
+                if configured:
+                    self.camera_layout = configured
                 elif len(active_cameras) == 1:
                     # show single camera as fullscreen
                     camera = active_cameras_to_add[0]
@@ -626,34 +660,63 @@ class BirdsEyeFrameManager:
 
         return frame_changed, layout_changed
 
+    def grid_lines(self, cols: int, rows: int) -> tuple[list[int], list[int]]:
+        """Get the pixel position of every line of a cols x rows grid.
+
+        Lines are snapped to the alignment YUV420 needs: get_yuv_crop() derives
+        the chroma planes with crop[1] // 4 and crop[0] // 2, so a y offset or
+        height that is not a multiple of 4 (or an x offset or width that is not
+        a multiple of 2) silently shifts the U/V planes against the Y plane and
+        tints the tile. A plain 1920x1080 divided into 4 rows gives 270px rows,
+        which would do exactly that.
+        """
+        # Canvas.height is a true division, so it is a float. Everything here
+        # ends up as a numpy slice index, which must be an int.
+        width = int(self.canvas.width)
+        height = int(self.canvas.height)
+
+        x_lines = [round(i * width / cols / 2) * 2 for i in range(cols + 1)]
+        y_lines = [round(i * height / rows / 4) * 4 for i in range(rows + 1)]
+
+        # the last line covers the rest of the canvas, so the tiles still tile
+        # it exactly
+        x_lines[-1] = width // 2 * 2
+        y_lines[-1] = height // 4 * 4
+
+        return x_lines, y_lines
+
+    def grid_tile(
+        self,
+        camera: str,
+        x_lines: list[int],
+        y_lines: list[int],
+        rect: tuple[int, int, int, int],
+    ) -> list[Any]:
+        """Turn a camera's place on the grid into a layout row."""
+        col, row, span_c, span_r = rect
+        x, y = x_lines[col], y_lines[row]
+        return [
+            (
+                camera,
+                (
+                    x,
+                    y,
+                    x_lines[col + span_c] - x,
+                    y_lines[row + span_r] - y,
+                ),
+            )
+        ]
+
     def fixed_layout(self, cameras_to_add: list[str]) -> list[list[Any]]:
         """Place cameras on a fixed grid taken from config.
 
         Unlike the automatic layout this never repacks, so a camera always
         appears in the same place and can be given more of the canvas than its
         neighbors via its span.
-
-        Grid lines are snapped to the alignment YUV420 needs: get_yuv_crop()
-        derives the chroma planes with crop[1] // 4 and crop[0] // 2, so a y
-        offset or height that is not a multiple of 4 (or an x offset or width
-        that is not a multiple of 2) silently shifts the U/V planes against the
-        Y plane and tints the tile. A plain 1920x1080 divided into 4 rows gives
-        270px rows, which would do exactly that.
         """
         cols = self.config.birdseye.layout.cols
         rows = self.config.birdseye.layout.rows
-
-        # Canvas.height is a true division, so it is a float. Everything below
-        # ends up as a numpy slice index, which must be an int.
-        width = int(self.canvas.width)
-        height = int(self.canvas.height)
-
-        # Snapped grid lines, so every tile edge is chroma-aligned by
-        # construction and the tiles still tile the whole canvas exactly.
-        x_lines = [round(i * width / cols / 2) * 2 for i in range(cols + 1)]
-        y_lines = [round(i * height / rows / 4) * 4 for i in range(rows + 1)]
-        x_lines[-1] = width // 2 * 2
-        y_lines[-1] = height // 4 * 4
+        x_lines, y_lines = self.grid_lines(cols, rows)
 
         occupied: dict[tuple[int, int], str] = {}
         layout: list[list[Any]] = []
@@ -695,22 +758,46 @@ class BirdsEyeFrameManager:
                 for r in range(row, row + span_r):
                     occupied[(c, r)] = camera
 
-            x, y = x_lines[col], y_lines[row]
             layout.append(
-                [
-                    (
-                        camera,
-                        (
-                            x,
-                            y,
-                            x_lines[col + span_c] - x,
-                            y_lines[row + span_r] - y,
-                        ),
-                    )
-                ]
+                self.grid_tile(camera, x_lines, y_lines, (col, row, span_c, span_r))
             )
 
         return layout
+
+    def dynamic_layout(self, cameras_to_add: list[str]) -> list[list[Any]]:
+        """Place cameras on the drawn layout matching how many are shown.
+
+        The layout decides the shape of each slot and the cameras fill the
+        slots in order, so a camera keeps its position relative to the others
+        while the view still uses the whole canvas as cameras come and go.
+        """
+        layouts = self.config.birdseye.layout.layouts
+        sizes = sorted(layouts)
+        count = len(cameras_to_add)
+
+        if count in layouts:
+            rows = layouts[count]
+        elif sizes and count > sizes[-1]:
+            # the largest drawn layout is the cap, so the lowest priority
+            # cameras are left out rather than shrinking everything
+            rows = layouts[sizes[-1]]
+            cameras_to_add = cameras_to_add[: sizes[-1]]
+        else:
+            if count not in self.warned_layout_counts:
+                self.warned_layout_counts.add(count)
+                logger.warning(
+                    "No birdseye layout is drawn for %s cameras, using the automatic layout",
+                    count,
+                )
+            return []
+
+        slots = parse_layout_slots(rows)
+        x_lines, y_lines = self.grid_lines(len(rows[0]), len(rows))
+
+        return [
+            self.grid_tile(camera, x_lines, y_lines, slots[slot])
+            for camera, slot in zip(cameras_to_add, sorted(slots))
+        ]
 
     def calculate_layout(
         self,

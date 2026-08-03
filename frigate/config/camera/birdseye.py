@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..base import FrigateBaseModel
 
@@ -10,7 +10,59 @@ __all__ = [
     "BirdseyeLayoutConfig",
     "BirdseyeLayoutModeEnum",
     "BirdseyeModeEnum",
+    "parse_layout_slots",
 ]
+
+
+def parse_layout_slots(rows: list[str]) -> dict[str, tuple[int, int, int, int]]:
+    """Read a drawn layout into a rectangle per slot.
+
+    Each row is one grid row and each character is one cell: a letter for the
+    slot the cell belongs to, or "." for a cell that is left empty. Returns
+    {slot: (column, row, column span, row span)} keyed by the slot letter.
+    """
+    if not rows:
+        raise ValueError("layout has no rows")
+
+    cols = len(rows[0])
+
+    if cols == 0:
+        raise ValueError("layout rows are empty")
+
+    if any(len(row) != cols for row in rows):
+        raise ValueError("layout rows are not all the same length")
+
+    cells: dict[str, list[tuple[int, int]]] = {}
+
+    for row_index, row in enumerate(rows):
+        for col_index, slot in enumerate(row):
+            if slot == ".":
+                continue
+
+            if not slot.isalpha():
+                raise ValueError(f"'{slot}' is not a letter or '.'")
+
+            cells.setdefault(slot, []).append((col_index, row_index))
+
+    slots = {}
+
+    for slot, positions in sorted(cells.items()):
+        columns = [position[0] for position in positions]
+        row_indexes = [position[1] for position in positions]
+        col, row = min(columns), min(row_indexes)
+        span_c = max(columns) - col + 1
+        span_r = max(row_indexes) - row + 1
+
+        # anything other than a solid rectangle cannot be drawn as one tile
+        if len(positions) != span_c * span_r:
+            raise ValueError(f"slot '{slot}' is not a rectangle")
+
+        slots[slot] = (col, row, span_c, span_r)
+
+    if not slots:
+        raise ValueError("layout has no slots")
+
+    return slots
 
 
 class BirdseyeModeEnum(str, Enum):
@@ -30,13 +82,14 @@ class BirdseyeModeEnum(str, Enum):
 class BirdseyeLayoutModeEnum(str, Enum):
     auto = "auto"
     fixed = "fixed"
+    dynamic = "dynamic"
 
 
 class BirdseyeLayoutConfig(FrigateBaseModel):
     mode: BirdseyeLayoutModeEnum = Field(
         default=BirdseyeLayoutModeEnum.auto,
         title="Layout mode",
-        description="How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span.",
+        description="How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span, 'dynamic' picks a drawn layout matching the number of cameras being shown.",
     )
     cols: int = Field(
         default=4,
@@ -52,6 +105,17 @@ class BirdseyeLayoutConfig(FrigateBaseModel):
         ge=1,
         le=16,
     )
+    layouts: dict[int, list[str]] = Field(
+        default_factory=dict,
+        title="Drawn layouts",
+        description="Layout to use for each number of cameras being shown when the layout mode is 'dynamic'. Each layout is drawn as a list of rows, one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell. Slots are filled in alphabetical order with the cameras being shown, ordered by their position.",
+    )
+    dwell: int = Field(
+        default=0,
+        title="Layout dwell time",
+        description="Seconds a dynamic layout is kept before the view is laid out again, which keeps the tiles from moving every time a camera comes or goes.",
+        ge=0,
+    )
     scaling_factor: float = Field(
         default=2.0,
         title="Scaling factor",
@@ -64,6 +128,23 @@ class BirdseyeLayoutConfig(FrigateBaseModel):
         title="Max cameras",
         description="Maximum number of cameras to display at once in Birdseye; shows the most recent cameras.",
     )
+
+    @model_validator(mode="after")
+    def validate_layouts(self) -> "BirdseyeLayoutConfig":
+        for count, rows in self.layouts.items():
+            try:
+                slots = parse_layout_slots(rows)
+            except ValueError as err:
+                raise ValueError(
+                    f"Birdseye layout for {count} cameras is invalid: {err}"
+                ) from err
+
+            if len(slots) != count:
+                raise ValueError(
+                    f"Birdseye layout for {count} cameras has {len(slots)} slots"
+                )
+
+        return self
 
 
 class BirdseyeConfig(FrigateBaseModel):

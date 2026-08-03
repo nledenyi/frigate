@@ -602,7 +602,7 @@
       "description": "Layout options for the Birdseye composition.",
       "mode": {
         "label": "Layout mode",
-        "description": "How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span."
+        "description": "How tiles are placed: 'auto' packs the active cameras automatically, 'fixed' places each camera on a grid using its own cell and span, 'dynamic' picks a drawn layout matching the number of cameras being shown."
       },
       "cols": {
         "label": "Grid columns",
@@ -611,6 +611,14 @@
       "rows": {
         "label": "Grid rows",
         "description": "Number of grid rows when the layout mode is 'fixed'."
+      },
+      "layouts": {
+        "label": "Drawn layouts",
+        "description": "Layout to use for each number of cameras being shown when the layout mode is 'dynamic'. Each layout is drawn as a list of rows, one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell. Slots are filled in alphabetical order with the cameras being shown, ordered by their position."
+      },
+      "dwell": {
+        "label": "Layout dwell time",
+        "description": "Seconds a dynamic layout is kept before the view is laid out again, which keeps the tiles from moving every time a camera comes or goes."
       },
       "scaling_factor": {
         "label": "Scaling factor",
