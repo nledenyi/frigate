@@ -345,11 +345,50 @@ class BirdsEyeFrameManager:
         self.last_output_time = 0.0
         self.last_layout_time = 0.0
         self.warned_layout_counts: set[int] = set()
+        self.layout_settings = self.get_layout_settings()
 
-        layout_mode = config.birdseye.layout.mode
+        self.warn_about_layout()
+
+    def get_layout_settings(self) -> tuple[Any, ...]:
+        """Get everything the current layout was built from.
+
+        The layout is only rebuilt when the cameras being shown change, so a
+        layout that was edited while running is picked up by noticing that the
+        settings it was built from are not the settings in the config anymore.
+        """
+        layout = self.config.birdseye.layout
+        return (
+            layout.mode,
+            layout.cols,
+            layout.rows,
+            tuple(
+                sorted(
+                    (count, tuple(rows)) for count, rows in layout.drawn_layouts.items()
+                )
+            ),
+            layout.scaling_factor,
+            tuple(
+                (camera, settings.birdseye.cell, settings.birdseye.span)
+                for camera, settings in sorted(self.config.cameras.items())
+            ),
+        )
+
+    def apply_layout_settings(self, settings: tuple[Any, ...]) -> None:
+        """Take on layout settings that were changed while running."""
+        self.layout_settings = settings
+        self.canvas.scaling_factor = self.config.birdseye.layout.scaling_factor
+        # the packed layout of a camera count is only valid for the scaling
+        # factor it was searched with
+        self.canvas.coefficient_cache.clear()
+        self.warned_layout_counts.clear()
+        self.warn_about_layout()
+
+    def warn_about_layout(self) -> None:
+        """Report the settings a layout mode quietly ignores."""
+        layout_mode = self.config.birdseye.layout.mode
 
         if layout_mode != BirdseyeLayoutModeEnum.auto and (
-            config.birdseye.layout.max_cameras
+            self.config.birdseye.layout.max_cameras
         ):
             logger.warning(
                 "birdseye layout.max_cameras is ignored when layout mode is '%s'",
@@ -358,15 +397,15 @@ class BirdsEyeFrameManager:
 
         if (
             layout_mode == BirdseyeLayoutModeEnum.fixed
-            and config.birdseye.mode != BirdseyeModeEnum.continuous
+            and self.config.birdseye.mode != BirdseyeModeEnum.continuous
         ):
             logger.warning(
                 "birdseye layout mode is 'fixed' with mode '%s', so cells belonging to inactive cameras will stay black",
-                config.birdseye.mode.value,
+                self.config.birdseye.mode.value,
             )
 
         if layout_mode == BirdseyeLayoutModeEnum.dynamic and (
-            not config.birdseye.layout.layouts
+            not self.config.birdseye.layout.layouts
         ):
             logger.warning(
                 "birdseye layout mode is 'dynamic' but no layouts are drawn, so the automatic layout is used"
@@ -476,6 +515,16 @@ class BirdsEyeFrameManager:
         Returns (frame_changed, layout_changed) to indicate if the frame or layout changed.
         """
 
+        # a layout edited in the settings is published to this process, so the
+        # layout it replaces has to be dropped even when the same cameras are
+        # being shown
+        layout_settings = self.get_layout_settings()
+        layout_settings_changed = layout_settings != self.layout_settings
+
+        if layout_settings_changed:
+            logger.debug("Birdseye layout settings changed")
+            self.apply_layout_settings(layout_settings)
+
         # determine how many cameras are tracking objects within the last inactivity_threshold seconds
         active_cameras: set[str] = set(
             [
@@ -549,9 +598,13 @@ class BirdsEyeFrameManager:
                 logger.debug("Birdseye camera order changed")
                 reset_layout = True
 
+            if layout_settings_changed:
+                reset_layout = True
+
             dwell = self.config.birdseye.layout.dwell
             if (
                 reset_layout
+                and not layout_settings_changed
                 and dwell
                 and self.camera_layout
                 and self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.dynamic

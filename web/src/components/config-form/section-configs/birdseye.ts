@@ -59,11 +59,6 @@ const birdseye: SectionConfigOverrides = {
       "width",
       "height",
       "quality",
-      "layout.mode",
-      "layout.cols",
-      "layout.rows",
-      "layout.layouts",
-      "layout.scaling_factor",
       "idle_heartbeat_fps",
     ],
     uiSchema: {

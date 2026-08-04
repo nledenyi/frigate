@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from frigate.config import FrigateConfig
 from frigate.config.camera.birdseye import (
+    BirdseyeCameraConfig,
+    BirdseyeConfig,
     BirdseyeDrawnLayoutConfig,
     BirdseyeLayoutConfig,
     parse_layout_slots,
@@ -408,6 +410,110 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
         self.manager.update_frame()
 
         assert sorted(layout_rects(self.manager)) == ["back", "front", "side"]
+
+
+class TestBirdseyeLayoutSettingsChanges(unittest.TestCase):
+    """Test a layout edited in the settings is applied without a restart."""
+
+    def setUp(self):
+        self.config, self.manager = build_manager(
+            {"mode": "dynamic", "layouts": [{"cameras": 3, "rows": ["AAB", "AAC"]}]},
+            {camera: {} for camera in ("back", "front", "side")},
+        )
+
+    def test_layout_mode_change_is_picked_up(self):
+        """Test switching mode relayouts, the way a saved section arrives."""
+        self.manager.update_frame()
+
+        # the settings publish the whole section, so the config the manager was
+        # built with is replaced rather than edited
+        self.config.birdseye = BirdseyeConfig(
+            enabled=True,
+            mode="continuous",
+            layout=BirdseyeLayoutConfig(mode="fixed", cols=2, rows=2),
+        )
+        self.config.cameras["back"].birdseye = BirdseyeCameraConfig(
+            mode="continuous", cell=(0, 0), span=(2, 1)
+        )
+        self.config.cameras["front"].birdseye = BirdseyeCameraConfig(
+            mode="continuous", cell=(0, 1)
+        )
+        self.config.cameras["side"].birdseye = BirdseyeCameraConfig(
+            mode="continuous", cell=(1, 1)
+        )
+
+        _, layout_changed = self.manager.update_frame()
+
+        assert layout_changed
+        assert layout_rects(self.manager) == {
+            "back": (0, 0, 1280, 360),
+            "front": (0, 360, 640, 360),
+            "side": (640, 360, 640, 360),
+        }
+
+    def test_drawn_layout_change_is_picked_up(self):
+        """Test redrawing the layout for the cameras being shown relayouts."""
+        self.manager.update_frame()
+
+        self.config.birdseye.layout.layouts = [
+            BirdseyeDrawnLayoutConfig(cameras=3, rows=["ABC"])
+        ]
+
+        _, layout_changed = self.manager.update_frame()
+
+        assert layout_changed
+        assert layout_rects(self.manager) == {
+            "back": (0, 0, 426, 720),
+            "front": (426, 0, 428, 720),
+            "side": (854, 0, 426, 720),
+        }
+
+    def test_camera_cell_change_is_picked_up(self):
+        """Test moving a camera on the grid relayouts."""
+        self.config.birdseye.layout = BirdseyeLayoutConfig(mode="fixed", cols=2, rows=2)
+        self.config.cameras["back"].birdseye.cell = (0, 0)
+        self.manager.update_frame()
+
+        # a camera section published for one camera replaces its settings
+        self.config.cameras["back"].birdseye = BirdseyeCameraConfig(
+            mode="continuous", cell=(1, 1)
+        )
+
+        _, layout_changed = self.manager.update_frame()
+
+        assert layout_changed
+        assert layout_rects(self.manager) == {"back": (640, 360, 640, 360)}
+
+    def test_dwell_does_not_hold_a_settings_change(self):
+        """Test an edit is applied even while the tiles are being held."""
+        self.config.birdseye.layout.dwell = 60
+        self.manager.update_frame()
+
+        self.config.birdseye.layout.layouts = [
+            BirdseyeDrawnLayoutConfig(cameras=3, rows=["ABC"])
+        ]
+
+        _, layout_changed = self.manager.update_frame()
+
+        assert layout_changed
+
+    def test_unchanged_settings_keep_the_layout(self):
+        """Test a repeat update with nothing edited doesn't relayout."""
+        self.manager.update_frame()
+
+        _, layout_changed = self.manager.update_frame()
+
+        assert not layout_changed
+
+    def test_scaling_factor_change_is_picked_up(self):
+        """Test the canvas takes a scaling factor that was edited."""
+        self.config.birdseye.layout.mode = "auto"
+        self.manager.update_frame()
+
+        self.config.birdseye.layout.scaling_factor = 3.0
+        self.manager.update_frame()
+
+        assert self.manager.canvas.scaling_factor == 3.0
 
 
 class TestBirdseyeLayoutSaving(unittest.TestCase):
