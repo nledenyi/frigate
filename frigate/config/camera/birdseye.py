@@ -7,6 +7,7 @@ from ..base import FrigateBaseModel
 __all__ = [
     "BirdseyeCameraConfig",
     "BirdseyeConfig",
+    "BirdseyeDrawnLayoutConfig",
     "BirdseyeLayoutConfig",
     "BirdseyeLayoutModeEnum",
     "BirdseyeModeEnum",
@@ -85,6 +86,34 @@ class BirdseyeLayoutModeEnum(str, Enum):
     dynamic = "dynamic"
 
 
+class BirdseyeDrawnLayoutConfig(FrigateBaseModel):
+    cameras: int = Field(
+        title="Camera count",
+        description="Number of cameras being shown that this layout is drawn for.",
+        ge=1,
+    )
+    rows: list[str] = Field(
+        title="Drawn rows",
+        description="The layout, drawn as a list of rows with one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell.",
+    )
+
+    @model_validator(mode="after")
+    def validate_rows(self) -> "BirdseyeDrawnLayoutConfig":
+        try:
+            slots = parse_layout_slots(self.rows)
+        except ValueError as err:
+            raise ValueError(
+                f"Birdseye layout for {self.cameras} cameras is invalid: {err}"
+            ) from err
+
+        if len(slots) != self.cameras:
+            raise ValueError(
+                f"Birdseye layout for {self.cameras} cameras has {len(slots)} slots"
+            )
+
+        return self
+
+
 class BirdseyeLayoutConfig(FrigateBaseModel):
     mode: BirdseyeLayoutModeEnum = Field(
         default=BirdseyeLayoutModeEnum.auto,
@@ -105,10 +134,10 @@ class BirdseyeLayoutConfig(FrigateBaseModel):
         ge=1,
         le=16,
     )
-    layouts: dict[int, list[str]] = Field(
-        default_factory=dict,
+    layouts: list[BirdseyeDrawnLayoutConfig] = Field(
+        default_factory=list,
         title="Drawn layouts",
-        description="Layout to use for each number of cameras being shown when the layout mode is 'dynamic'. Each layout is drawn as a list of rows, one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell. Slots are filled in alphabetical order with the cameras being shown, ordered by their position.",
+        description="A layout drawn for each number of cameras being shown when the layout mode is 'dynamic'. Slots are filled in alphabetical order with the cameras being shown, ordered by their position.",
     )
     dwell: int = Field(
         default=0,
@@ -129,20 +158,17 @@ class BirdseyeLayoutConfig(FrigateBaseModel):
         description="Maximum number of cameras to display at once in Birdseye; shows the most recent cameras.",
     )
 
+    @property
+    def drawn_layouts(self) -> dict[int, list[str]]:
+        """Get the drawn layouts by the number of cameras they are drawn for."""
+        return {layout.cameras: layout.rows for layout in self.layouts}
+
     @model_validator(mode="after")
     def validate_layouts(self) -> "BirdseyeLayoutConfig":
-        for count, rows in self.layouts.items():
-            try:
-                slots = parse_layout_slots(rows)
-            except ValueError as err:
-                raise ValueError(
-                    f"Birdseye layout for {count} cameras is invalid: {err}"
-                ) from err
+        counts = [layout.cameras for layout in self.layouts]
 
-            if len(slots) != count:
-                raise ValueError(
-                    f"Birdseye layout for {count} cameras has {len(slots)} slots"
-                )
+        if len(set(counts)) != len(counts):
+            raise ValueError("Birdseye has more than one layout for a camera count")
 
         return self
 

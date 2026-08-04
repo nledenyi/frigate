@@ -242,7 +242,7 @@ Notes on fixed layouts:
 
 A fixed layout keeps a camera in the same cell whether or not it is being shown, which leaves holes when Birdseye is set to `motion` or `objects`. The `dynamic` layout mode instead draws a layout for each number of cameras and picks the one matching how many cameras are being shown right now, so the view always fills the canvas.
 
-Each layout is drawn as a list of rows, one character per cell. A letter marks the slot the cell belongs to, and `.` leaves the cell empty. Slots are filled in alphabetical order with the cameras being shown, ordered by their `order`, so cameras keep their relative positions as the view changes.
+Each layout says how many cameras it is drawn for and is drawn as a list of rows, one character per cell. A letter marks the slot the cell belongs to, and `.` leaves the cell empty. Slots are filled in alphabetical order with the cameras being shown, ordered by their `order`, so cameras keep their relative positions as the view changes.
 
 <ConfigTabs>
 <TabItem value="ui">
@@ -257,7 +257,7 @@ Navigate to <NavPath path="Settings > System > Birdseye" /> and set **Layout > L
 </TabItem>
 <TabItem value="yaml">
 
-```yaml {3-5,7-13}
+```yaml {3-5,7-17}
 birdseye:
   enabled: True
   mode: motion
@@ -266,10 +266,14 @@ birdseye:
     # keep a layout for at least 15 seconds so tiles do not move constantly
     dwell: 15
     layouts:
-      1: ["A"]
-      2: ["AB"]
-      4: ["AB", "CD"]
-      6: ["AAB", "AAC", "DEF"]
+      - cameras: 1
+        rows: ["A"]
+      - cameras: 2
+        rows: ["AB"]
+      - cameras: 4
+        rows: ["AB", "CD"]
+      - cameras: 6
+        rows: ["AAB", "AAC", "DEF"]
 ```
 
 The layout for six cameras above gives the first camera a 2x2 tile in the top left corner and lays the other five out around it.
@@ -279,7 +283,7 @@ The layout for six cameras above gives the first camera a 2x2 tile in the top le
 
 Notes on dynamic layouts:
 
-- A layout has to have exactly as many slots as the number of cameras it is drawn for, and each slot has to be a rectangle. Frigate reports the layout as a config error otherwise.
+- A layout has to have exactly as many slots as the number of cameras it is drawn for, and each slot has to be a rectangle. Frigate reports the layout as a config error otherwise, and it does the same for two layouts drawn for the same number of cameras.
 - If more cameras are being shown than the largest drawn layout has slots, the largest layout is used and the cameras that come last are left out, so the largest layout acts as a limit.
 - If there is no layout drawn for the number of cameras being shown, Birdseye lays them out automatically and logs a warning.
 - `layout.max_cameras` is ignored, since the largest drawn layout already limits how many cameras are shown.

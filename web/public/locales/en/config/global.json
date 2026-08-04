@@ -614,7 +614,15 @@
       },
       "layouts": {
         "label": "Drawn layouts",
-        "description": "Layout to use for each number of cameras being shown when the layout mode is 'dynamic'. Each layout is drawn as a list of rows, one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell. Slots are filled in alphabetical order with the cameras being shown, ordered by their position."
+        "description": "A layout drawn for each number of cameras being shown when the layout mode is 'dynamic'. Slots are filled in alphabetical order with the cameras being shown, ordered by their position.",
+        "cameras": {
+          "label": "Camera count",
+          "description": "Number of cameras being shown that this layout is drawn for."
+        },
+        "rows": {
+          "label": "Drawn rows",
+          "description": "The layout, drawn as a list of rows with one character per cell: a letter for the slot the cell belongs to, or '.' for an empty cell."
+        }
       },
       "dwell": {
         "label": "Layout dwell time",

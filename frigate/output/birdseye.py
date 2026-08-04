@@ -771,7 +771,7 @@ class BirdsEyeFrameManager:
         slots in order, so a camera keeps its position relative to the others
         while the view still uses the whole canvas as cameras come and go.
         """
-        layouts = self.config.birdseye.layout.layouts
+        layouts = self.config.birdseye.layout.drawn_layouts
         sizes = sorted(layouts)
         count = len(cameras_to_add)
 

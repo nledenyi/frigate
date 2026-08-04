@@ -1,13 +1,39 @@
 """Test camera user and password cleanup."""
 
 import multiprocessing as mp
+import os
+import tempfile
 import unittest
 
 from pydantic import ValidationError
 
 from frigate.config import FrigateConfig
-from frigate.config.camera.birdseye import BirdseyeLayoutConfig, parse_layout_slots
+from frigate.config.camera.birdseye import (
+    BirdseyeDrawnLayoutConfig,
+    BirdseyeLayoutConfig,
+    parse_layout_slots,
+)
 from frigate.output.birdseye import BirdsEyeFrameManager, get_canvas_shape
+from frigate.util.builtin import flatten_config_data, update_yaml_file_bulk
+
+SAVING_CONFIG = """
+mqtt:
+  enabled: false
+birdseye:
+  enabled: true
+  mode: continuous
+cameras:
+  back:
+    ffmpeg:
+      inputs:
+        - path: rtsp://10.0.0.1:554/video
+          roles:
+            - detect
+    detect:
+      height: 1080
+      width: 1920
+      fps: 5
+"""
 
 
 def build_manager(
@@ -190,7 +216,20 @@ class TestBirdseyeDrawnLayouts(unittest.TestCase):
     def test_slot_count_has_to_match_the_camera_count(self):
         """Test a layout drawn for the wrong number of cameras is rejected."""
         with self.assertRaises(ValidationError):
-            BirdseyeLayoutConfig(mode="dynamic", layouts={3: ["AB"]})
+            BirdseyeLayoutConfig(
+                mode="dynamic", layouts=[{"cameras": 3, "rows": ["AB"]}]
+            )
+
+    def test_one_layout_per_camera_count(self):
+        """Test two layouts drawn for the same number of cameras are rejected."""
+        with self.assertRaises(ValidationError):
+            BirdseyeLayoutConfig(
+                mode="dynamic",
+                layouts=[
+                    {"cameras": 2, "rows": ["AB"]},
+                    {"cameras": 2, "rows": ["A", "B"]},
+                ],
+            )
 
 
 class TestBirdseyeDynamicLayout(unittest.TestCase):
@@ -204,7 +243,10 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
                 "mode": "continuous",
                 "layout": {
                     "mode": "dynamic",
-                    "layouts": {2: ["AB"], 3: ["AAB", "AAC"]},
+                    "layouts": [
+                        {"cameras": 2, "rows": ["AB"]},
+                        {"cameras": 3, "rows": ["AAB", "AAC"]},
+                    ],
                 },
             },
             "cameras": {
@@ -276,7 +318,9 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
 
     def test_largest_drawn_layout_caps_the_cameras(self):
         """Test the lowest priority cameras are left out above the largest layout."""
-        self.config.birdseye.layout.layouts = {2: ["AB"]}
+        self.config.birdseye.layout.layouts = [
+            BirdseyeDrawnLayoutConfig(cameras=2, rows=["AB"])
+        ]
 
         self.manager.update_frame()
 
@@ -284,7 +328,10 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
 
     def test_undrawn_count_falls_back_to_the_automatic_layout(self):
         """Test a count between drawn layouts still shows every camera."""
-        self.config.birdseye.layout.layouts = {2: ["AB"], 4: ["AB", "CD"]}
+        self.config.birdseye.layout.layouts = [
+            BirdseyeDrawnLayoutConfig(cameras=2, rows=["AB"]),
+            BirdseyeDrawnLayoutConfig(cameras=4, rows=["AB", "CD"]),
+        ]
 
         self.manager.update_frame()
 
@@ -361,3 +408,53 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
         self.manager.update_frame()
 
         assert sorted(layout_rects(self.manager)) == ["back", "front", "side"]
+
+
+class TestBirdseyeLayoutSaving(unittest.TestCase):
+    """Test a layout painted in the settings can be written to the config."""
+
+    def save(self, config_data: dict) -> FrigateConfig:
+        """Write a settings payload to a config file the way the API does."""
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".yml", delete=False
+        ) as config_file:
+            config_file.write(SAVING_CONFIG)
+            path = config_file.name
+
+        try:
+            update_yaml_file_bulk(path, flatten_config_data(config_data))
+
+            with open(path) as written:
+                return FrigateConfig.parse(written.read())
+        finally:
+            os.unlink(path)
+
+    def test_drawn_layouts_are_written(self):
+        """Test the drawn layouts survive a round trip through the config file."""
+        config = self.save(
+            {
+                "birdseye": {
+                    "layout": {
+                        "mode": "dynamic",
+                        "layouts": [
+                            {"cameras": 1, "rows": ["A"]},
+                            {"cameras": 3, "rows": ["AAB", "AAC"]},
+                        ],
+                    }
+                }
+            }
+        )
+
+        assert config.birdseye.layout.drawn_layouts == {
+            1: ["A"],
+            3: ["AAB", "AAC"],
+        }
+
+    def test_camera_placement_is_written(self):
+        """Test a camera's cell and span survive the same round trip."""
+        config = self.save(
+            {"cameras": {"back": {"birdseye": {"cell": [1, 0], "span": [2, 1]}}}}
+        )
+
+        assert config.cameras["back"].birdseye.cell == (1, 0)
+        assert config.cameras["back"].birdseye.span == (2, 1)

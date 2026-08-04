@@ -12,12 +12,18 @@ export interface UiConfig {
 
 export type BirdseyeLayoutMode = "auto" | "fixed" | "dynamic";
 
+export interface BirdseyeDrawnLayout {
+  /** Number of cameras being shown this layout is drawn for */
+  cameras: number;
+  /** The layout, drawn as one character per cell */
+  rows: string[];
+}
+
 export interface BirdseyeLayoutConfig {
   mode: BirdseyeLayoutMode;
   cols: number;
   rows: number;
-  /** Rows of drawn cells, keyed by the number of cameras being shown */
-  layouts: Record<string, string[]>;
+  layouts: BirdseyeDrawnLayout[];
   dwell: number;
   scaling_factor: number;
   max_cameras: number | null;

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import axios from "axios";
 import { toast } from "sonner";
@@ -18,7 +25,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { FrigateConfig } from "@/types/frigateConfig";
+import { BirdseyeDrawnLayout, FrigateConfig } from "@/types/frigateConfig";
 import type { ConfigSectionData, JsonObject } from "@/types/configForm";
 import { cn } from "@/lib/utils";
 import type { SectionRendererProps } from "./registry";
@@ -143,14 +150,17 @@ type GridSizeProps = {
 
 function GridSize({ cols, rows, onChange }: GridSizeProps) {
   const { t } = useTranslation(["views/settings"]);
+  // a page can hold a grid per camera count, so the labels need ids of their own
+  const id = useId();
 
   return (
     <div className="flex flex-row items-end gap-3">
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">
+        <Label className="text-xs text-muted-foreground" htmlFor={`${id}-cols`}>
           {t("birdseye.layoutBuilder.columns")}
         </Label>
         <Input
+          id={`${id}-cols`}
           className="w-20"
           type="number"
           min={1}
@@ -162,10 +172,11 @@ function GridSize({ cols, rows, onChange }: GridSizeProps) {
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs text-muted-foreground">
+        <Label className="text-xs text-muted-foreground" htmlFor={`${id}-rows`}>
           {t("birdseye.layoutBuilder.rows")}
         </Label>
         <Input
+          id={`${id}-rows`}
           className="w-20"
           type="number"
           min={1}
@@ -404,50 +415,53 @@ function DynamicLayoutsBuilder({
   layouts,
   onChange,
 }: {
-  layouts: Record<string, string[]>;
-  onChange: (layouts: Record<string, string[]>) => void;
+  layouts: BirdseyeDrawnLayout[];
+  onChange: (layouts: BirdseyeDrawnLayout[]) => void;
 }) {
   const { t } = useTranslation(["views/settings"]);
 
-  const counts = useMemo(
-    () =>
-      Object.keys(layouts)
-        .map((count) => Number(count))
-        .filter((count) => Number.isInteger(count) && count > 0)
-        .sort((a, b) => a - b),
+  const drawn = useMemo(
+    () => [...layouts].sort((a, b) => a.cameras - b.cameras),
     [layouts],
   );
 
   const nextCount = useMemo(() => {
     for (let count = 1; count <= SLOT_LETTERS.length; count++) {
-      if (!counts.includes(count)) return count;
+      if (!drawn.some((layout) => layout.cameras === count)) return count;
     }
     return null;
-  }, [counts]);
+  }, [drawn]);
 
   const handleAdd = () => {
     if (!nextCount) return;
 
     const cols = Math.ceil(Math.sqrt(nextCount));
     const rows = Math.ceil(nextCount / cols);
-    const drawn = Array.from({ length: rows }, (_, row) =>
-      Array.from({ length: cols }, (_, col) => {
-        const slot = row * cols + col;
-        return slot < nextCount ? SLOT_LETTERS[slot] : ".";
-      }).join(""),
-    );
 
-    onChange({ ...layouts, [nextCount]: drawn });
+    onChange([
+      ...layouts,
+      {
+        cameras: nextCount,
+        rows: Array.from({ length: rows }, (_, row) =>
+          Array.from({ length: cols }, (_, col) => {
+            const slot = row * cols + col;
+            return slot < nextCount ? SLOT_LETTERS[slot] : ".";
+          }).join(""),
+        ),
+      },
+    ]);
   };
 
   const handleRemove = (count: number) => {
-    const next = { ...layouts };
-    delete next[count];
-    onChange(next);
+    onChange(layouts.filter((layout) => layout.cameras !== count));
   };
 
-  const handleLayoutChange = (count: number, drawn: string[]) => {
-    onChange({ ...layouts, [count]: drawn });
+  const handleLayoutChange = (count: number, rows: string[]) => {
+    onChange(
+      layouts.map((layout) =>
+        layout.cameras === count ? { ...layout, rows } : layout,
+      ),
+    );
   };
 
   return (
@@ -456,13 +470,13 @@ function DynamicLayoutsBuilder({
       description={t("birdseye.layoutBuilder.dynamic.description")}
       content={
         <div className="max-w-md space-y-4">
-          {counts.map((count) => (
+          {drawn.map((layout) => (
             <DynamicLayout
-              key={count}
-              count={count}
-              drawn={layouts[count]}
-              onChange={(drawn) => handleLayoutChange(count, drawn)}
-              onRemove={() => handleRemove(count)}
+              key={layout.cameras}
+              count={layout.cameras}
+              drawn={layout.rows}
+              onChange={(rows) => handleLayoutChange(layout.cameras, rows)}
+              onRemove={() => handleRemove(layout.cameras)}
             />
           ))}
           <Button
@@ -607,10 +621,8 @@ export default function BirdseyeLayoutBuilder({
   }
 
   if (mode === "dynamic") {
-    const layouts = (get(formData, "layout.layouts") ?? {}) as Record<
-      string,
-      string[]
-    >;
+    const layouts = (get(formData, "layout.layouts") ??
+      []) as unknown as BirdseyeDrawnLayout[];
 
     return (
       <DynamicLayoutsBuilder
