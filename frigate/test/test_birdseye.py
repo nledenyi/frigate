@@ -10,6 +10,49 @@ from frigate.config.camera.birdseye import BirdseyeLayoutConfig, parse_layout_sl
 from frigate.output.birdseye import BirdsEyeFrameManager, get_canvas_shape
 
 
+def build_manager(
+    layout: dict, cameras: dict[str, dict]
+) -> tuple[FrigateConfig, BirdsEyeFrameManager]:
+    """Build a frame manager showing every camera with nothing to draw.
+
+    The cameras are marked as continuously active without a frame, which
+    exercises the layout without needing real yuv frames.
+    """
+    config = FrigateConfig(
+        **{
+            "mqtt": {"enabled": False},
+            "birdseye": {"enabled": True, "mode": "continuous", "layout": layout},
+            "cameras": {
+                camera: {
+                    "birdseye": birdseye,
+                    "ffmpeg": {
+                        "inputs": [
+                            {"path": "rtsp://10.0.0.1:554/video", "roles": ["detect"]}
+                        ]
+                    },
+                    "detect": {"height": 1080, "width": 1920, "fps": 5},
+                }
+                for camera, birdseye in cameras.items()
+            },
+        }
+    )
+    manager = BirdsEyeFrameManager(config, mp.Event())
+
+    for camera_data in manager.cameras.values():
+        camera_data["current_frame"] = None
+        camera_data["current_frame_time"] = 1.0
+        camera_data["last_active_frame"] = 1.0
+
+    return config, manager
+
+
+def layout_rects(manager: BirdsEyeFrameManager) -> dict[str, tuple[int, int, int, int]]:
+    """Return the rectangle each camera is drawn into."""
+    return {
+        position[0]: position[1] for row in manager.camera_layout for position in row
+    }
+
+
 class TestBirdseye(unittest.TestCase):
     def test_16x9(self):
         """Test 16x9 aspect ratio works as expected for birdseye."""
@@ -246,3 +289,75 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
         self.manager.update_frame()
 
         assert sorted(self.layout()) == ["back", "front", "side"]
+
+
+class TestBirdseyeFixedLayout(unittest.TestCase):
+    """Test cameras are placed on the grid drawn in the config."""
+
+    def setUp(self):
+        # a 1280x720 canvas on a 2x2 grid, so the tiles are 640x360 and the
+        # camera spanning both rows is 640x720
+        self.config, self.manager = build_manager(
+            {"mode": "fixed", "cols": 2, "rows": 2},
+            {
+                "back": {"cell": (0, 0), "span": (1, 2)},
+                "front": {"cell": (1, 0)},
+                "side": {"cell": (1, 1)},
+            },
+        )
+
+    def test_cameras_are_placed_on_their_cells(self):
+        """Test every camera is drawn into the cell it was given."""
+        self.manager.update_frame()
+
+        assert layout_rects(self.manager) == {
+            "back": (0, 0, 640, 720),
+            "front": (640, 0, 640, 360),
+            "side": (640, 360, 640, 360),
+        }
+
+    def test_an_inactive_camera_leaves_its_cell_empty(self):
+        """Test the cameras still being shown keep their place."""
+        self.manager.update_frame()
+
+        # age the camera out of the view without removing it
+        self.manager.cameras["front"]["current_frame_time"] = 1000.0
+        self.manager.update_frame()
+
+        assert layout_rects(self.manager) == {
+            "back": (0, 0, 640, 720),
+            "side": (640, 360, 640, 360),
+        }
+
+    def test_a_camera_without_a_cell_is_skipped(self):
+        """Test a camera that was never placed is left out of the layout."""
+        self.config.cameras["side"].birdseye.cell = None
+
+        self.manager.update_frame()
+
+        assert sorted(layout_rects(self.manager)) == ["back", "front"]
+
+    def test_a_cell_outside_the_grid_is_skipped(self):
+        """Test a camera placed off the grid is left out rather than drawn."""
+        self.config.cameras["front"].birdseye.cell = (2, 0)
+
+        self.manager.update_frame()
+
+        assert sorted(layout_rects(self.manager)) == ["back", "side"]
+
+    def test_an_overlapping_cell_is_skipped(self):
+        """Test the camera that would cover another one is left out."""
+        self.config.cameras["back"].birdseye.span = (2, 2)
+
+        self.manager.update_frame()
+
+        assert layout_rects(self.manager) == {"back": (0, 0, 1280, 720)}
+
+    def test_no_cells_falls_back_to_the_automatic_layout(self):
+        """Test an empty grid still shows the cameras rather than nothing."""
+        for camera in self.config.cameras.values():
+            camera.birdseye.cell = None
+
+        self.manager.update_frame()
+
+        assert sorted(layout_rects(self.manager)) == ["back", "front", "side"]
