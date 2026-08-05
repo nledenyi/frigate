@@ -86,6 +86,51 @@ function readRects(cells: Cells): {
   return { rects, invalid };
 }
 
+/** Read a drawn layout back into the grid the editor paints. */
+function layoutCells(drawn: string[]): Cells {
+  return drawn.map((row) =>
+    row.split("").map((slot) => (slot === "." ? null : slot)),
+  );
+}
+
+/**
+ * The slots a layout can be painted with. Any letter is a slot as far as the
+ * backend is concerned, so the ones already drawn are kept rather than replaced
+ * with A, B, C, which would rewrite a hand-written layout on the first click.
+ */
+function layoutSlots(count: number, drawn: string[]): string[] {
+  const used = Array.from(
+    new Set(
+      drawn
+        .join("")
+        .split("")
+        .filter((slot) => slot !== "."),
+    ),
+  );
+  const slots = used.slice(0, count);
+
+  for (const letter of SLOT_LETTERS) {
+    if (slots.length >= count) break;
+    if (!slots.some((slot) => slot.toUpperCase() === letter))
+      slots.push(letter);
+  }
+
+  return slots.sort();
+}
+
+/** The problems that stop a drawn layout from being saved. */
+function layoutErrors(
+  count: number,
+  drawn: string[],
+): { invalid: string[]; missing: string[] } {
+  const { rects, invalid } = readRects(layoutCells(drawn));
+
+  return {
+    invalid,
+    missing: layoutSlots(count, drawn).filter((slot) => !(slot in rects)),
+  };
+}
+
 type LayoutGridProps = {
   cells: Cells;
   options: { key: string; label: React.ReactNode }[];
@@ -95,6 +140,7 @@ type LayoutGridProps = {
 
 /** The grid itself: every cell picks which slot it belongs to. */
 function LayoutGrid({ cells, options, emptyLabel, onChange }: LayoutGridProps) {
+  const { t } = useTranslation(["views/settings"]);
   const cols = cells[0]?.length ?? 0;
 
   const handleCellChange = (row: number, col: number, value: string) => {
@@ -118,6 +164,12 @@ function LayoutGrid({ cells, options, emptyLabel, onChange }: LayoutGridProps) {
             }
           >
             <SelectTrigger
+              // the trigger reads as the slot it holds, or as a dash, so it
+              // needs a name of its own to be told apart from its neighbors
+              aria-label={t("birdseye.layoutBuilder.cell", {
+                row: rowIndex + 1,
+                col: colIndex + 1,
+              })}
               className={cn(
                 "h-auto min-h-12 justify-center px-1 py-2 text-center text-xs",
                 key ? "bg-selected/20" : "text-muted-foreground",
@@ -475,9 +527,11 @@ function FixedLayoutBuilder({
 function DynamicLayoutsBuilder({
   layouts,
   onChange,
+  setValidationErrors,
 }: {
   layouts: BirdseyeDrawnLayout[];
   onChange: (layouts: BirdseyeDrawnLayout[]) => void;
+  setValidationErrors?: (hasErrors: boolean) => void;
 }) {
   const { t } = useTranslation(["views/settings"]);
 
@@ -485,6 +539,18 @@ function DynamicLayoutsBuilder({
     () => [...layouts].sort((a, b) => a.cameras - b.cameras),
     [layouts],
   );
+
+  // a layout the builder is already reporting in red is rejected by the
+  // backend, which fails the whole section save, so it has to hold Save shut
+  const hasErrors = drawn.some((layout) => {
+    const { invalid, missing } = layoutErrors(layout.cameras, layout.rows);
+    return invalid.length > 0 || missing.length > 0;
+  });
+
+  useEffect(() => {
+    setValidationErrors?.(hasErrors);
+    return () => setValidationErrors?.(false);
+  }, [hasErrors, setValidationErrors]);
 
   const nextCount = useMemo(() => {
     for (let count = 1; count <= SLOT_LETTERS.length; count++) {
@@ -569,20 +635,16 @@ function DynamicLayout({
 }) {
   const { t } = useTranslation(["views/settings"]);
 
-  const cells = useMemo(
-    () =>
-      drawn.map((row) =>
-        row.split("").map((slot) => (slot === "." ? null : slot)),
-      ),
-    [drawn],
-  );
+  const cells = useMemo(() => layoutCells(drawn), [drawn]);
 
   const cols = cells[0]?.length ?? 1;
   const rows = cells.length;
-  const slots = useMemo(() => SLOT_LETTERS.slice(0, count).split(""), [count]);
+  const slots = useMemo(() => layoutSlots(count, drawn), [count, drawn]);
 
-  const { rects, invalid } = useMemo(() => readRects(cells), [cells]);
-  const missing = slots.filter((slot) => !(slot in rects));
+  const { invalid, missing } = useMemo(
+    () => layoutErrors(count, drawn),
+    [count, drawn],
+  );
 
   const write = (nextCells: Cells) =>
     onChange(nextCells.map((row) => row.map((slot) => slot ?? ".").join("")));
@@ -636,6 +698,7 @@ function DynamicLayout({
 
 export default function BirdseyeLayoutBuilder({
   formContext,
+  setValidationErrors,
 }: SectionRendererProps) {
   const { data: config } = useSWR<FrigateConfig>("config");
 
@@ -689,6 +752,7 @@ export default function BirdseyeLayoutBuilder({
       <DynamicLayoutsBuilder
         layouts={layouts}
         onChange={(next) => updateLayout("layouts", next)}
+        setValidationErrors={setValidationErrors}
       />
     );
   }

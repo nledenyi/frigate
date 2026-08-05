@@ -25,6 +25,7 @@ const CONFIG_SCHEMA = JSON.parse(
 const SETTINGS_URL = "/settings?page=systemBirdseye";
 const FIRST_CAMERA = /front.?door/i;
 const NOT_A_RECTANGLE = /do not form a rectangle/;
+const MISSING_SLOTS = /not on the grid yet/;
 const RESTART_REQUIRED = /Restart Frigate to apply/;
 
 async function installRoutes(page: Page) {
@@ -73,9 +74,17 @@ async function setGridSize(page: Page, cols: number, rows: number) {
   await page.getByLabel("Rows").press("Enter");
 }
 
-/** Paint a cell of the grid, counted left to right and top to bottom. */
-async function paintCell(page: Page, index: number, option: string | RegExp) {
-  await page.locator("div.grid").getByRole("combobox").nth(index).click();
+/** Paint a cell of the grid, addressed the way it is announced. */
+async function paintCell(
+  page: Page,
+  row: number,
+  col: number,
+  option: string | RegExp,
+) {
+  await page
+    .locator("div.grid")
+    .getByRole("combobox", { name: `Row ${row}, column ${col}` })
+    .click();
   await page.getByRole("option", { name: option }).click();
 }
 
@@ -92,8 +101,8 @@ test.describe("birdseye layout settings @medium", () => {
     await setGridSize(frigateApp.page, 2, 2);
 
     // the top row is one camera, so it is saved as a two column span
-    await paintCell(frigateApp.page, 0, FIRST_CAMERA);
-    await paintCell(frigateApp.page, 1, FIRST_CAMERA);
+    await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
+    await paintCell(frigateApp.page, 1, 2, FIRST_CAMERA);
 
     // placement lives on the cameras, so it is saved as it is painted rather
     // than waiting for the section save
@@ -125,11 +134,11 @@ test.describe("birdseye layout settings @medium", () => {
     await selectLayoutMode(frigateApp.page, "Fixed grid");
     await setGridSize(frigateApp.page, 2, 2);
 
-    await paintCell(frigateApp.page, 0, FIRST_CAMERA);
+    await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
     await expect.poll(() => capture.saveCount(), { timeout: 5_000 }).toBe(1);
 
     // the two cells share a corner, which cannot be composed as one tile
-    await paintCell(frigateApp.page, 3, FIRST_CAMERA);
+    await paintCell(frigateApp.page, 2, 2, FIRST_CAMERA);
 
     await expect(frigateApp.page.getByText(NOT_A_RECTANGLE)).toBeVisible();
     expect(capture.saveCount()).toBe(1);
@@ -168,5 +177,25 @@ test.describe("birdseye layout settings @medium", () => {
       });
 
     await expect(frigateApp.page.getByText(RESTART_REQUIRED)).toBeHidden();
+  });
+
+  test("a drawn layout with an unplaced slot cannot be saved", async ({
+    frigateApp,
+  }) => {
+    await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Dynamic");
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await expect(frigateApp.page.getByText("1 camera")).toBeVisible();
+
+    // taking the only slot off the grid leaves the layout short of a slot,
+    // which the backend rejects, failing the whole section save with it
+    await paintCell(frigateApp.page, 1, 1, "Empty");
+
+    await expect(frigateApp.page.getByText(MISSING_SLOTS)).toBeVisible();
+    await expect(
+      frigateApp.page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeDisabled();
   });
 });

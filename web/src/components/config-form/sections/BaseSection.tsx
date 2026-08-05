@@ -279,6 +279,10 @@ export function ConfigSection({
   const [isSaving, setIsSaving] = useState(false);
   const [isResettingToDefault, setIsResettingToDefault] = useState(false);
   const [hasValidationErrors, setHasValidationErrors] = useState(false);
+  // a section extra validates what it draws itself, which the form cannot see
+  const [renderersWithErrors, setRenderersWithErrors] = useState<Set<string>>(
+    new Set(),
+  );
   const [extraHasChanges, setExtraHasChanges] = useState(false);
   const [formKey, setFormKey] = useState(0);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
@@ -907,6 +911,30 @@ export function ConfigSection({
       );
   }, [sectionConfig.customValidate, sectionValidation]);
 
+  // one setter per renderer, kept stable so reporting from an effect does not
+  // feed itself a new callback on every render
+  const validationSetters = useRef(
+    new Map<string, (hasErrors: boolean) => void>(),
+  );
+  const getValidationSetter = useCallback((key: string) => {
+    const existing = validationSetters.current.get(key);
+    if (existing) return existing;
+
+    const setter = (hasErrors: boolean) =>
+      setRenderersWithErrors((previous) => {
+        if (previous.has(key) === hasErrors) return previous;
+        const next = new Set(previous);
+        if (hasErrors) {
+          next.add(key);
+        } else {
+          next.delete(key);
+        }
+        return next;
+      });
+    validationSetters.current.set(key, setter);
+    return setter;
+  }, []);
+
   // Wrap renderers with runtime props (selectedCamera, setUnsavedChanges, etc.)
   const wrappedRenderers = useMemo(() => {
     const baseRenderers =
@@ -932,11 +960,18 @@ export function ConfigSection({
                 setPendingData(null);
               }
             }}
+            setValidationErrors={getValidationSetter(key)}
           />
         ),
       ]),
     );
-  }, [sectionConfig?.renderers, sectionPath, cameraName, setPendingData]);
+  }, [
+    sectionConfig?.renderers,
+    sectionPath,
+    cameraName,
+    setPendingData,
+    getValidationSetter,
+  ]);
 
   // Build a flat list of pending field changes for this section only.
   // Mirrors the global Save All preview but scoped to the current section so
@@ -1146,6 +1181,7 @@ export function ConfigSection({
                 disabled={
                   !hasChanges ||
                   hasValidationErrors ||
+                  renderersWithErrors.size > 0 ||
                   isSaving ||
                   isSavingAll ||
                   disabled

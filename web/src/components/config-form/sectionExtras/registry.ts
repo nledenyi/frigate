@@ -11,6 +11,8 @@ import type { ConfigFormContext } from "@/types/configForm";
 export type SectionRendererProps = {
   selectedCamera?: string;
   setUnsavedChanges?: (hasChanges: boolean) => void;
+  /** Hold the section's Save shut while the renderer is showing an error */
+  setValidationErrors?: (hasErrors: boolean) => void;
   formContext?: ConfigFormContext;
   [key: string]: unknown; // Allow additional props from uiSchema
 };

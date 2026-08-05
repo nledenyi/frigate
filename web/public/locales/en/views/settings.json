@@ -1860,6 +1860,7 @@
         "description": "Choose which camera fills each cell. Give a camera several neighboring cells to make its tile larger. Placement is saved as you edit it."
       },
       "emptyCell": "Empty",
+      "cell": "Row {{row}}, column {{col}}",
       "notARectangle": "These cells do not form a rectangle: {{slots}}",
       "columns": "Columns",
       "rows": "Rows",
