@@ -152,6 +152,22 @@ function GridSize({ cols, rows, onChange }: GridSizeProps) {
   const { t } = useTranslation(["views/settings"]);
   // a page can hold a grid per camera count, so the labels need ids of their own
   const id = useId();
+  // a size is only applied once it has been typed out, since resizing on every
+  // keystroke would apply the first digit of a two digit size as a real resize
+  const [draft, setDraft] = useState({
+    cols: String(cols),
+    rows: String(rows),
+  });
+
+  useEffect(() => {
+    setDraft({ cols: String(cols), rows: String(rows) });
+  }, [cols, rows]);
+
+  const commit = (side: "cols" | "rows") => {
+    const next = clampSide(Number(draft[side]), side === "cols" ? cols : rows);
+    setDraft((previous) => ({ ...previous, [side]: String(next) }));
+    onChange(side === "cols" ? next : cols, side === "rows" ? next : rows);
+  };
 
   return (
     <div className="flex flex-row items-end gap-3">
@@ -165,10 +181,14 @@ function GridSize({ cols, rows, onChange }: GridSizeProps) {
           type="number"
           min={1}
           max={MAX_GRID_SIDE}
-          value={cols}
+          value={draft.cols}
           onChange={(event) =>
-            onChange(clampSide(event.target.valueAsNumber, cols), rows)
+            setDraft((previous) => ({ ...previous, cols: event.target.value }))
           }
+          onBlur={() => commit("cols")}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
         />
       </div>
       <div className="space-y-1.5">
@@ -181,10 +201,14 @@ function GridSize({ cols, rows, onChange }: GridSizeProps) {
           type="number"
           min={1}
           max={MAX_GRID_SIDE}
-          value={rows}
+          value={draft.rows}
           onChange={(event) =>
-            onChange(cols, clampSide(event.target.valueAsNumber, rows))
+            setDraft((previous) => ({ ...previous, rows: event.target.value }))
           }
+          onBlur={() => commit("rows")}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
         />
       </div>
     </div>
@@ -194,6 +218,18 @@ function GridSize({ cols, rows, onChange }: GridSizeProps) {
 function clampSide(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(MAX_GRID_SIDE, Math.max(1, Math.round(value)));
+}
+
+/** Compare two grids cell by cell. */
+function sameCells(a: Cells, b: Cells): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (row, rowIndex) =>
+        row.length === b[rowIndex].length &&
+        row.every((key, colIndex) => key === b[rowIndex][colIndex]),
+    )
+  );
 }
 
 /** Grow or shrink a grid, keeping whatever still fits. */
@@ -297,9 +333,19 @@ function FixedLayoutBuilder({
   const [cells, setCells] = useState<Cells>(configuredCells);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const savedResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingRef = useRef(false);
 
   useEffect(() => {
-    setCells(configuredCells);
+    // every painted cell is saved and the config is read back, so taking the
+    // grid from a refetch that is the placement being saved would discard
+    // whatever has been painted since
+    if (savingRef.current) {
+      return;
+    }
+
+    setCells((previous) =>
+      sameCells(previous, configuredCells) ? previous : configuredCells,
+    );
   }, [configuredCells]);
 
   useEffect(() => {
@@ -323,18 +369,31 @@ function FixedLayoutBuilder({
       const cameraUpdates: Record<string, JsonObject> = {};
       cameras.forEach((camera) => {
         const rect = rects[camera];
-        cameraUpdates[camera] = {
-          birdseye: rect
-            ? { cell: [rect[0], rect[1]], span: [rect[2], rect[3]] }
-            : { cell: null },
-        };
+
+        if (rect) {
+          cameraUpdates[camera] = {
+            birdseye: { cell: [rect[0], rect[1]], span: [rect[2], rect[3]] },
+          };
+          return;
+        }
+
+        // a null clears the key rather than writing one, so only cameras that
+        // are on the grid have a placement to take off it
+        if (config.cameras[camera].birdseye?.cell) {
+          cameraUpdates[camera] = { birdseye: { cell: null } };
+        }
       });
+
+      if (Object.keys(cameraUpdates).length === 0) {
+        return;
+      }
 
       if (savedResetTimerRef.current) {
         clearTimeout(savedResetTimerRef.current);
         savedResetTimerRef.current = null;
       }
       setSaveStatus("saving");
+      savingRef.current = true;
 
       try {
         await axios.put("config/set", {
@@ -343,12 +402,14 @@ function FixedLayoutBuilder({
           config_data: { cameras: cameraUpdates },
         });
         await updateConfig();
+        savingRef.current = false;
         setSaveStatus("saved");
         savedResetTimerRef.current = setTimeout(() => {
           setSaveStatus("idle");
           savedResetTimerRef.current = null;
         }, SAVED_INDICATOR_MS);
       } catch (error) {
+        savingRef.current = false;
         setCells(configuredCells);
         setSaveStatus("idle");
         const errorMessage =
@@ -363,7 +424,7 @@ function FixedLayoutBuilder({
         );
       }
     },
-    [cameras, configuredCells, updateConfig, t],
+    [cameras, config, configuredCells, updateConfig, t],
   );
 
   const handleChange = (nextCells: Cells) => {

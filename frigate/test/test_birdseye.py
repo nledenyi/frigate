@@ -37,6 +37,12 @@ cameras:
       fps: 5
 """
 
+# the same config with the camera already placed on the grid
+PLACED_CONFIG = SAVING_CONFIG.replace(
+    "    detect:",
+    "    birdseye:\n      cell: [1, 0]\n    detect:",
+)
+
 
 def build_manager(
     layout: dict, cameras: dict[str, dict]
@@ -318,6 +324,14 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
 
         assert self.layout() == before
 
+    def test_max_cameras_is_ignored(self):
+        """Test the drawn layout decides how many cameras are shown."""
+        self.config.birdseye.layout.max_cameras = 2
+
+        self.manager.update_frame()
+
+        assert sorted(self.layout()) == ["back", "front", "side"]
+
     def test_largest_drawn_layout_caps_the_cameras(self):
         """Test the lowest priority cameras are left out above the largest layout."""
         self.config.birdseye.layout.layouts = [
@@ -410,6 +424,31 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
         self.manager.update_frame()
 
         assert sorted(layout_rects(self.manager)) == ["back", "front", "side"]
+
+    def test_max_cameras_is_ignored(self):
+        """Test the grid decides which cameras are shown, not max_cameras."""
+        self.config.birdseye.layout.max_cameras = 2
+
+        self.manager.update_frame()
+
+        assert sorted(layout_rects(self.manager)) == ["back", "front", "side"]
+
+    def test_a_span_below_one_is_rejected(self):
+        """Test a span that draws an empty tile is rejected at load."""
+        with self.assertRaises(ValidationError):
+            BirdseyeCameraConfig(cell=(0, 0), span=(0, 1))
+
+    def test_a_skipped_camera_is_only_warned_about_once(self):
+        """Test the skip warning is not repeated on every layout rebuild."""
+        self.config.cameras["side"].birdseye.cell = None
+
+        with self.assertLogs("frigate.output.birdseye", level="WARNING") as logs:
+            self.manager.update_frame()
+            # age a camera out so the layout is rebuilt
+            self.manager.cameras["front"]["current_frame_time"] = 1000.0
+            self.manager.update_frame()
+
+        assert len([line for line in logs.output if "has no cell" in line]) == 1
 
 
 class TestBirdseyeLayoutSettingsChanges(unittest.TestCase):
@@ -519,16 +558,22 @@ class TestBirdseyeLayoutSettingsChanges(unittest.TestCase):
 class TestBirdseyeLayoutSaving(unittest.TestCase):
     """Test a layout painted in the settings can be written to the config."""
 
-    def save(self, config_data: dict) -> FrigateConfig:
+    def save(self, config_data: dict, base: str = SAVING_CONFIG) -> FrigateConfig:
         """Write a settings payload to a config file the way the API does."""
         with tempfile.NamedTemporaryFile(
             "w", suffix=".yml", delete=False
         ) as config_file:
-            config_file.write(SAVING_CONFIG)
+            config_file.write(base)
             path = config_file.name
 
         try:
-            update_yaml_file_bulk(path, flatten_config_data(config_data))
+            updates = flatten_config_data(config_data)
+            # the API turns a null into the empty string that removes a key,
+            # so a payload that clears a placement has to go through it too
+            updates = {
+                key: ("" if value is None else value) for key, value in updates.items()
+            }
+            update_yaml_file_bulk(path, updates)
 
             with open(path) as written:
                 return FrigateConfig.parse(written.read())
@@ -564,3 +609,11 @@ class TestBirdseyeLayoutSaving(unittest.TestCase):
 
         assert config.cameras["back"].birdseye.cell == (1, 0)
         assert config.cameras["back"].birdseye.span == (2, 1)
+
+    def test_taking_a_camera_off_the_grid_is_written(self):
+        """Test clearing a placement removes the cell it was saved with."""
+        config = self.save(
+            {"cameras": {"back": {"birdseye": {"cell": None}}}}, base=PLACED_CONFIG
+        )
+
+        assert config.cameras["back"].birdseye.cell is None

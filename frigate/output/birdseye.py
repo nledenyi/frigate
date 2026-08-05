@@ -345,6 +345,7 @@ class BirdsEyeFrameManager:
         self.last_output_time = 0.0
         self.last_layout_time = 0.0
         self.warned_layout_counts: set[int] = set()
+        self.warned_fixed_cameras: set[tuple[str, str]] = set()
         self.layout_settings = self.get_layout_settings()
 
         self.warn_about_layout()
@@ -381,7 +382,20 @@ class BirdsEyeFrameManager:
         # factor it was searched with
         self.canvas.coefficient_cache.clear()
         self.warned_layout_counts.clear()
+        self.warned_fixed_cameras.clear()
         self.warn_about_layout()
+
+    def warn_about_camera_once(self, key: tuple[str, str], message: str) -> None:
+        """Report a camera that cannot be placed, once per layout edit.
+
+        A fixed layout is rebuilt every time the cameras being shown change, so
+        warning from the layout itself would repeat for as long as it is wrong.
+        """
+        if key in self.warned_fixed_cameras:
+            return
+
+        self.warned_fixed_cameras.add(key)
+        logger.warning(message)
 
     def warn_about_layout(self) -> None:
         """Report the settings a layout mode quietly ignores."""
@@ -541,7 +555,13 @@ class BirdsEyeFrameManager:
         )
         logger.debug(f"Active cameras: {active_cameras}")
 
-        max_cameras = self.config.birdseye.layout.max_cameras
+        # which camera goes where is already decided by a fixed or dynamic
+        # layout, so the cap only applies to the automatic one
+        max_cameras = (
+            self.config.birdseye.layout.max_cameras
+            if self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.auto
+            else None
+        )
         max_camera_refresh = False
         if max_cameras:
             now = datetime.datetime.now().timestamp()
@@ -777,8 +797,9 @@ class BirdsEyeFrameManager:
         for camera in cameras_to_add:
             settings = self.config.cameras[camera].birdseye
             if settings.cell is None:
-                logger.warning(
-                    f"Birdseye layout is 'fixed' but {camera} has no cell, skipping it"
+                self.warn_about_camera_once(
+                    ("no cell", camera),
+                    f"Birdseye layout is 'fixed' but {camera} has no cell, skipping it",
                 )
                 continue
 
@@ -786,9 +807,10 @@ class BirdsEyeFrameManager:
             span_c, span_r = settings.span
 
             if col < 0 or row < 0 or col + span_c > cols or row + span_r > rows:
-                logger.warning(
+                self.warn_about_camera_once(
+                    ("off the grid", camera),
                     f"Birdseye cell {list(settings.cell)} span {list(settings.span)} "
-                    f"for {camera} does not fit a {cols}x{rows} grid, skipping it"
+                    f"for {camera} does not fit a {cols}x{rows} grid, skipping it",
                 )
                 continue
 
@@ -802,8 +824,9 @@ class BirdsEyeFrameManager:
                 None,
             )
             if clash is not None:
-                logger.warning(
-                    f"Birdseye cell for {camera} overlaps {clash}, skipping {camera}"
+                self.warn_about_camera_once(
+                    ("overlap", camera),
+                    f"Birdseye cell for {camera} overlaps {clash}, skipping {camera}",
                 )
                 continue
 

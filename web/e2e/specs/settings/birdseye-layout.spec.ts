@@ -66,8 +66,11 @@ async function selectLayoutMode(page: Page, mode: string) {
 
 /** Set the size of the grid that is being painted. */
 async function setGridSize(page: Page, cols: number, rows: number) {
+  // a size is applied once it has been typed out, not on every keystroke
   await page.getByLabel("Columns").fill(String(cols));
+  await page.getByLabel("Columns").press("Enter");
   await page.getByLabel("Rows").fill(String(rows));
+  await page.getByLabel("Rows").press("Enter");
 }
 
 /** Paint a cell of the grid, counted left to right and top to bottom. */
@@ -92,8 +95,8 @@ test.describe("birdseye layout settings @medium", () => {
     await paintCell(frigateApp.page, 0, FIRST_CAMERA);
     await paintCell(frigateApp.page, 1, FIRST_CAMERA);
 
-    // placement lives on the cameras, so it is saved as it is painted and
-    // fans out to every camera rather than waiting for the section save
+    // placement lives on the cameras, so it is saved as it is painted rather
+    // than waiting for the section save
     await expect
       .poll(() => capture.capturedConfig(), { timeout: 5_000 })
       .toMatchObject({
@@ -102,10 +105,15 @@ test.describe("birdseye layout settings @medium", () => {
         config_data: {
           cameras: {
             front_door: { birdseye: { cell: [0, 0], span: [2, 1] } },
-            backyard: { birdseye: { cell: null } },
           },
         },
       });
+
+    // a camera that is not on the grid has no placement to clear, and asking
+    // to clear a key the config does not have is rejected by the config API
+    expect(capture.capturedConfig()).not.toHaveProperty(
+      "config_data.cameras.backyard",
+    );
   });
 
   test("a painted shape that is not a rectangle is reported, not saved", async ({

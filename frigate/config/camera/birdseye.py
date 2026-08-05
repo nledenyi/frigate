@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -250,8 +251,8 @@ class BirdseyeCameraConfig(BaseModel):
         title="Grid cell",
         description="Grid cell [column, row] this camera is placed in when the Birdseye layout mode is 'fixed'; zero-based, top-left origin.",
     )
-    span: tuple[int, int] = Field(
+    span: tuple[Annotated[int, Field(ge=1)], Annotated[int, Field(ge=1)]] = Field(
         default=(1, 1),
         title="Grid span",
-        description="How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'.",
+        description="How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'; at least 1 of each.",
     )

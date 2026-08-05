@@ -232,7 +232,7 @@ The example above gives `front` a large 2x2 tile in the top left corner and `bac
 
 Notes on fixed layouts:
 
-- A camera with no `cell` is left out of the view, and so is a camera whose cell and span fall outside the grid or overlap another camera. Each case is logged as a warning at startup.
+- A camera with no `cell` is left out of the view, and so is a camera whose cell and span fall outside the grid or overlap another camera. Each case is logged as a warning once, and again after the layout is edited.
 - Cells belonging to cameras that are not currently shown stay black, so a fixed layout is normally used with `mode: continuous`.
 - `layout.max_cameras` is ignored, since which camera goes where is already decided by the configuration.
 - Tiles keep their camera's aspect ratio and are letterboxed inside their cell.

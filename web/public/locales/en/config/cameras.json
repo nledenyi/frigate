@@ -84,7 +84,7 @@
     },
     "span": {
       "label": "Grid span",
-      "description": "How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'."
+      "description": "How many [columns, rows] this camera occupies when the Birdseye layout mode is 'fixed'; at least 1 of each."
     }
   },
   "detect": {
