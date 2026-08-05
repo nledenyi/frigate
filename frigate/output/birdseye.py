@@ -298,6 +298,11 @@ class BirdsEyeFrameManager:
         self.blank_frame[:] = 128
         self.blank_frame[0 : self.frame_shape[0], 0 : self.frame_shape[1]] = 16
 
+        # a fixed layout leaves the cells of cameras that are not being shown
+        # empty, and the idle logo below is blitted across the middle of the
+        # canvas, so those cells are cleared to black instead
+        self.black_frame = self.blank_frame.copy()
+
         # find and copy the logo on the blank frame
         birdseye_logo = None
 
@@ -369,7 +374,14 @@ class BirdsEyeFrameManager:
             ),
             layout.scaling_factor,
             tuple(
-                (camera, settings.birdseye.cell, settings.birdseye.span)
+                (
+                    camera,
+                    settings.birdseye.cell,
+                    settings.birdseye.span,
+                    # switching a camera off takes it out of the view, which
+                    # the dwell time must not hold on to
+                    settings.birdseye.enabled and settings.enabled,
+                )
                 for camera, settings in sorted(self.config.cameras.items())
             ),
         )
@@ -467,9 +479,9 @@ class BirdsEyeFrameManager:
             key=lambda camera: (self.config.cameras[camera].birdseye.order, camera),
         )
 
-    def clear_frame(self) -> None:
+    def clear_frame(self, black: bool = False) -> None:
         logger.debug("Clearing the birdseye frame")
-        self.frame[:] = self.blank_frame
+        self.frame[:] = self.black_frame if black else self.blank_frame
 
     def copy_to_position(
         self,
@@ -638,7 +650,10 @@ class BirdsEyeFrameManager:
             if reset_layout:
                 logger.debug("Resetting Birdseye layout...")
                 self.last_layout_time = datetime.datetime.now().timestamp()
-                self.clear_frame()
+                self.clear_frame(
+                    black=self.config.birdseye.layout.mode
+                    == BirdseyeLayoutModeEnum.fixed
+                )
                 self.active_cameras = active_cameras
                 self.layout_camera_order = sorted_active_cameras
                 layout_changed = True  # Layout is changing due to reset
@@ -649,17 +664,32 @@ class BirdsEyeFrameManager:
                 # a configured layout is already laid out, so there is nothing
                 # to pack and no coefficient to search for
                 configured = None
+                leave_canvas_empty = False
                 if self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.fixed:
                     configured = self.fixed_layout(active_cameras_to_add)
                     if not configured:
-                        logger.error(
-                            "Fixed birdseye layout produced no tiles, falling back to the automatic layout"
-                        )
+                        if any(
+                            camera.birdseye.cell is not None
+                            for camera in self.config.cameras.values()
+                        ):
+                            # the grid is drawn, the cameras being shown are
+                            # simply not on it, so a camera that was left off
+                            # the grid must not take the canvas over
+                            logger.debug(
+                                "No camera on the fixed birdseye grid is being shown"
+                            )
+                            leave_canvas_empty = True
+                        else:
+                            logger.error(
+                                "Fixed birdseye layout produced no tiles, falling back to the automatic layout"
+                            )
                 elif self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.dynamic:
                     configured = self.dynamic_layout(active_cameras_to_add)
 
                 if configured:
                     self.camera_layout = configured
+                elif leave_canvas_empty:
+                    self.camera_layout = []
                 elif len(active_cameras) == 1:
                     # show single camera as fullscreen
                     camera = active_cameras_to_add[0]

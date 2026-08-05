@@ -324,6 +324,17 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
 
         assert self.layout() == before
 
+    def test_dwell_does_not_hold_a_camera_that_was_switched_off(self):
+        """Test a camera taken out of birdseye leaves the wall right away."""
+        self.config.birdseye.layout.dwell = 60
+        self.manager.update_frame()
+
+        self.config.cameras["side"].birdseye.enabled = False
+
+        self.manager.update_frame()
+
+        assert "side" not in self.layout()
+
     def test_max_cameras_is_ignored(self):
         """Test the drawn layout decides how many cameras are shown."""
         self.config.birdseye.layout.max_cameras = 2
@@ -415,6 +426,30 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
         self.manager.update_frame()
 
         assert layout_rects(self.manager) == {"back": (0, 0, 1280, 720)}
+
+    def test_an_unplaced_camera_is_not_promoted_to_fullscreen(self):
+        """Test a camera left off the grid stays off it, even when alone."""
+        self.config.cameras["side"].birdseye.cell = None
+        self.manager.update_frame()
+
+        # the placed cameras stop being shown, leaving only the unplaced one
+        self.manager.cameras["back"]["current_frame_time"] = 1000.0
+        self.manager.cameras["front"]["current_frame_time"] = 1000.0
+        self.manager.update_frame()
+
+        assert layout_rects(self.manager) == {}
+
+    def test_an_empty_cell_is_left_black(self):
+        """Test the idle screen is not left showing through an empty cell."""
+        self.config.cameras["side"].birdseye.cell = None
+        # stand in for the Frigate logo the idle screen carries across the
+        # middle of the canvas, which a test image may not have
+        self.manager.blank_frame[:] = 200
+
+        self.manager.update_frame()
+
+        # the bottom right cell is the one with no camera in it
+        assert (self.manager.frame[360:720, 640:1280] == 16).all()
 
     def test_no_cells_falls_back_to_the_automatic_layout(self):
         """Test an empty grid still shows the cameras rather than nothing."""
