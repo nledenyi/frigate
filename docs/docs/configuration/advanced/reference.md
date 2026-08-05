@@ -260,10 +260,31 @@ birdseye:
   inactivity_threshold: 30
   # Optional: Configure the birdseye layout
   layout:
+    # Optional: How the cameras being shown are laid out. Available options are: auto, fixed, and dynamic
+    #   auto - the cameras are packed automatically, repacking as cameras come and go
+    #   fixed - each camera is placed on a grid with cell and span, and always appears in the same place
+    #   dynamic - a layout is drawn for each number of cameras being shown, and the matching one is used
+    # (default: shown below)
+    mode: auto
     # Optional: Scaling factor for the layout calculator, range 1.0-5.0 (default: shown below)
     scaling_factor: 2.0
     # Optional: Maximum number of cameras to show at one time, showing the most recent (default: show all cameras)
+    # NOTE: ignored when the layout mode is fixed or dynamic, which already decide what is shown
     max_cameras: 1
+    # Optional: Size of the grid cameras are placed on when the layout mode is fixed (default: shown below)
+    cols: 4
+    rows: 4
+    # Optional: Layouts to draw when the layout mode is dynamic, one per number of cameras being shown.
+    # Each row is one character per cell, a letter marks the slot the cell belongs to, and . leaves it
+    # empty. Slots are filled in alphabetical order with the cameras being shown, ordered by their order.
+    layouts:
+      - cameras: 2
+        rows: ["AB"]
+      - cameras: 3
+        rows: ["AAB", "AAC"]
+    # Optional: Seconds a drawn layout is kept before the view is laid out again, which stops the
+    # tiles moving every time a camera comes or goes (default: shown below)
+    dwell: 0
   # Optional: Frames-per-second to re-send the last composed Birdseye frame when idle (no motion or active updates). (default: shown below)
   idle_heartbeat_fps: 0.0
 
@@ -1051,6 +1072,12 @@ cameras:
       # Optional: Adjust sort order of cameras in the Birdseye view. Larger numbers come later (default: shown below)
       # By default the cameras are sorted alphabetically.
       order: 0
+      # Optional: Grid cell [column, row] this camera is placed in when the layout mode is fixed.
+      # Zero-based, counted from the top left. A camera with no cell is left out of the view.
+      cell: [0, 0]
+      # Optional: How many [columns, rows] this camera covers when the layout mode is fixed,
+      # at least 1 of each (default: shown below)
+      span: [1, 1]
 
     # Optional: Configuration for triggers to automate actions based on semantic search results.
     triggers:
