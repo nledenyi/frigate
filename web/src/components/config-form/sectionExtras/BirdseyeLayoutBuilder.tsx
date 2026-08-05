@@ -32,6 +32,9 @@ import type { SectionRendererProps } from "./registry";
 
 const SAVED_INDICATOR_MS = 1500;
 const EMPTY_CELL = "empty";
+// what a cell holds is a camera name or a slot letter, either of which could be
+// the word "empty", so the two are kept apart by prefixing rather than by hoping
+const SLOT_VALUE = "slot:";
 const MAX_GRID_SIDE = 12;
 const SLOT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -135,17 +138,25 @@ type LayoutGridProps = {
   cells: Cells;
   options: { key: string; label: React.ReactNode }[];
   emptyLabel: string;
+  disabled?: boolean;
   onChange: (cells: Cells) => void;
 };
 
 /** The grid itself: every cell picks which slot it belongs to. */
-function LayoutGrid({ cells, options, emptyLabel, onChange }: LayoutGridProps) {
+function LayoutGrid({
+  cells,
+  options,
+  emptyLabel,
+  disabled,
+  onChange,
+}: LayoutGridProps) {
   const { t } = useTranslation(["views/settings"]);
   const cols = cells[0]?.length ?? 0;
 
   const handleCellChange = (row: number, col: number, value: string) => {
     const next = cells.map((cellRow) => [...cellRow]);
-    next[row][col] = value === EMPTY_CELL ? null : value;
+    next[row][col] =
+      value === EMPTY_CELL ? null : value.slice(SLOT_VALUE.length);
     onChange(next);
   };
 
@@ -158,7 +169,8 @@ function LayoutGrid({ cells, options, emptyLabel, onChange }: LayoutGridProps) {
         row.map((key, colIndex) => (
           <Select
             key={`${rowIndex}-${colIndex}`}
-            value={key ?? EMPTY_CELL}
+            value={key === null ? EMPTY_CELL : `${SLOT_VALUE}${key}`}
+            disabled={disabled}
             onValueChange={(value) =>
               handleCellChange(rowIndex, colIndex, value)
             }
@@ -182,7 +194,10 @@ function LayoutGrid({ cells, options, emptyLabel, onChange }: LayoutGridProps) {
             <SelectContent>
               <SelectItem value={EMPTY_CELL}>{emptyLabel}</SelectItem>
               {options.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
+                <SelectItem
+                  key={option.key}
+                  value={`${SLOT_VALUE}${option.key}`}
+                >
                   {option.label}
                 </SelectItem>
               ))}
@@ -294,6 +309,8 @@ function resizeCells(cells: Cells, cols: number, rows: number): Cells {
   );
 }
 
+/** Reports the per-click placement save. The camera order strip has its
+ * own copy of this, with its own keys: the two are saved separately. */
 function SaveStatusIndicator({ status }: { status: SaveStatus }) {
   const { t } = useTranslation(["views/settings"]);
 
@@ -307,13 +324,13 @@ function SaveStatusIndicator({ status }: { status: SaveStatus }) {
     >
       {status === "saving" && (
         <span className="text-muted-foreground">
-          {t("birdseye.cameraOrder.saving")}
+          {t("birdseye.layoutBuilder.saving")}
         </span>
       )}
       {status === "saved" && (
         <span className="flex items-center gap-1 text-success">
           <LuCheck className="size-3.5" />
-          {t("birdseye.cameraOrder.saved")}
+          {t("birdseye.layoutBuilder.saved")}
         </span>
       )}
     </div>
@@ -326,17 +343,21 @@ function SaveStatusIndicator({ status }: { status: SaveStatus }) {
  * edited the same way for both layout modes.
  *
  * Camera placement lives on the cameras rather than in this section, so it is
- * saved on its own like the camera order above it.
+ * saved on its own like the camera order above it. That write cannot run ahead
+ * of the grid it is painted on, so painting waits until the layout mode and the
+ * grid size have actually been saved: see `locked`.
  */
 function FixedLayoutBuilder({
   config,
   cols,
   rows,
+  locked,
   onSizeChange,
 }: {
   config: FrigateConfig;
   cols: number;
   rows: number;
+  locked: boolean;
   onSizeChange: (cols: number, rows: number) => void;
 }) {
   const { t } = useTranslation(["views/settings", "common"]);
@@ -502,14 +523,26 @@ function FixedLayoutBuilder({
             emptyLabel={t("birdseye.layoutBuilder.emptyCell", {
               ns: "views/settings",
             })}
+            disabled={locked}
             onChange={handleChange}
           />
-          {invalid.length > 0 ? (
-            <div className="text-xs text-danger">
-              {t("birdseye.layoutBuilder.notARectangle", {
+          {locked ? (
+            <div className="text-xs text-muted-foreground">
+              {t("birdseye.layoutBuilder.fixed.saveFirst", {
                 ns: "views/settings",
-                slots: invalid.join(", "),
               })}
+            </div>
+          ) : invalid.length > 0 ? (
+            <div className="text-xs text-danger">
+              {t("birdseye.layoutBuilder.notARectangleCameras", {
+                ns: "views/settings",
+              })}{" "}
+              {invalid.map((camera, index) => (
+                <span key={camera}>
+                  {index > 0 && ", "}
+                  <CameraNameLabel camera={camera} className="text-xs" />
+                </span>
+              ))}
             </div>
           ) : (
             <SaveStatusIndicator status={saveStatus} />
@@ -591,6 +624,14 @@ function DynamicLayoutsBuilder({
     );
   };
 
+  const handleCountChange = (count: number, next: number) => {
+    onChange(
+      layouts.map((layout) =>
+        layout.cameras === count ? { ...layout, cameras: next } : layout,
+      ),
+    );
+  };
+
   return (
     <SplitCardRow
       label={t("birdseye.layoutBuilder.dynamic.label")}
@@ -602,7 +643,11 @@ function DynamicLayoutsBuilder({
               key={layout.cameras}
               count={layout.cameras}
               drawn={layout.rows}
+              taken={drawn
+                .map((other) => other.cameras)
+                .filter((cameras) => cameras !== layout.cameras)}
               onChange={(rows) => handleLayoutChange(layout.cameras, rows)}
+              onCountChange={(next) => handleCountChange(layout.cameras, next)}
               onRemove={() => handleRemove(layout.cameras)}
             />
           ))}
@@ -625,15 +670,47 @@ function DynamicLayoutsBuilder({
 function DynamicLayout({
   count,
   drawn,
+  taken,
   onChange,
+  onCountChange,
   onRemove,
 }: {
   count: number;
   drawn: string[];
+  taken: number[];
   onChange: (drawn: string[]) => void;
+  onCountChange: (count: number) => void;
   onRemove: () => void;
 }) {
   const { t } = useTranslation(["views/settings"]);
+  // a page holds one of these per layout, so the label needs an id of its own
+  const id = useId();
+  // the count is only applied once it has been typed out, for the same reason
+  // the grid size is: a two digit count passes through its first digit
+  const [draftCount, setDraftCount] = useState(String(count));
+
+  useEffect(() => {
+    setDraftCount(String(count));
+  }, [count]);
+
+  const commitCount = () => {
+    const next = Math.round(Number(draftCount));
+
+    // a layout is keyed by the number of cameras it is drawn for, so a count
+    // that already has one would collide with it
+    if (
+      !Number.isFinite(next) ||
+      next < 1 ||
+      next > SLOT_LETTERS.length ||
+      taken.includes(next)
+    ) {
+      setDraftCount(String(count));
+      return;
+    }
+
+    setDraftCount(String(next));
+    if (next !== count) onCountChange(next);
+  };
 
   const cells = useMemo(() => layoutCells(drawn), [drawn]);
 
@@ -651,15 +728,35 @@ function DynamicLayout({
 
   return (
     <div className="space-y-2 rounded-lg border border-secondary-foreground/20 p-3">
-      <div className="flex flex-row items-center justify-between">
-        <Label className="text-sm font-medium">
-          {t("birdseye.layoutBuilder.cameraCount", { count })}
-        </Label>
+      <div className="flex flex-row items-end justify-between gap-3">
+        <div className="space-y-1.5">
+          <Label
+            className="text-xs text-muted-foreground"
+            htmlFor={`${id}-count`}
+          >
+            {t("birdseye.layoutBuilder.camerasShown")}
+          </Label>
+          <Input
+            id={`${id}-count`}
+            className="w-20"
+            type="number"
+            min={1}
+            max={SLOT_LETTERS.length}
+            value={draftCount}
+            onChange={(event) => setDraftCount(event.target.value)}
+            onBlur={commitCount}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+        </div>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          aria-label={t("birdseye.layoutBuilder.removeLayout")}
+          aria-label={t("birdseye.layoutBuilder.removeLayout", {
+            count: count,
+          })}
           onClick={onRemove}
         >
           <LuTrash2 className="size-4 text-danger" />
@@ -728,12 +825,20 @@ export default function BirdseyeLayoutBuilder({
   if (mode === "fixed") {
     const cols = Number(get(formData, "layout.cols")) || 1;
     const rows = Number(get(formData, "layout.rows")) || 1;
+    const saved = config.birdseye.layout;
+    // placement is written straight onto the cameras, outside this section, so
+    // it must not run ahead of the grid it is painted on. Until the mode and
+    // the grid size are saved, a painted cell could be left pointing outside a
+    // grid that is never saved, or written while the mode is still auto.
+    const locked =
+      saved.mode !== "fixed" || saved.cols !== cols || saved.rows !== rows;
 
     return (
       <FixedLayoutBuilder
         config={config}
         cols={cols}
         rows={rows}
+        locked={locked}
         onSizeChange={(nextCols, nextRows) => {
           const next = cloneDeep(formData);
           set(next, "layout.cols", nextCols);

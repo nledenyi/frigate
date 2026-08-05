@@ -24,15 +24,33 @@ const CONFIG_SCHEMA = JSON.parse(
 
 const SETTINGS_URL = "/settings?page=systemBirdseye";
 const FIRST_CAMERA = /front.?door/i;
-const NOT_A_RECTANGLE = /do not form a rectangle/;
+const NOT_A_RECTANGLE = /not painted as a rectangle/;
 const MISSING_SLOTS = /not on the grid yet/;
+const SAVE_FIRST = /before placing cameras/;
 const RESTART_REQUIRED = /Restart Frigate to apply/;
 
+/** Merge a saved section into the config the way the backend would. */
+function mergeInto(target: Record<string, unknown>, source: object) {
+  Object.entries(source).forEach(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      target[key] ??= {};
+      mergeInto(target[key] as Record<string, unknown>, value);
+      return;
+    }
+    target[key] = value;
+  });
+}
+
 async function installRoutes(page: Page) {
-  const config = configFactory({ birdseye: { enabled: true } });
+  // saves are merged back into this, so it has to be this test's own copy and
+  // not a fixture shared with every other test in the worker
+  const config = structuredClone(
+    configFactory({ birdseye: { enabled: true } }),
+  );
 
   let lastSavedConfig: unknown = null;
   let saveCount = 0;
+  let placementSaveCount = 0;
 
   await page.route("**/api/config/schema.json", (route) =>
     route.fulfill({ json: CONFIG_SCHEMA }),
@@ -44,8 +62,17 @@ async function installRoutes(page: Page) {
     return route.fulfill({ json: { success: true } });
   });
   await page.route("**/api/config/set", async (route) => {
-    lastSavedConfig = route.request().postDataJSON();
+    const body = route.request().postDataJSON();
+    lastSavedConfig = body;
     saveCount += 1;
+    if (body?.update_topic === "config/cameras/*/birdseye") {
+      placementSaveCount += 1;
+    }
+    // the builder reads the saved layout back to decide whether it can be
+    // painted on, so a save has to be visible to the next config read
+    if (body?.config_data) {
+      mergeInto(config as unknown as Record<string, unknown>, body.config_data);
+    }
     await route.fulfill({ json: { success: true, require_restart: false } });
   });
   await page.route("**/api/config/raw_paths", (route) =>
@@ -55,7 +82,14 @@ async function installRoutes(page: Page) {
   return {
     capturedConfig: () => lastSavedConfig,
     saveCount: () => saveCount,
+    placementSaveCount: () => placementSaveCount,
   };
+}
+
+/** Save the section, which is what unlocks painting in fixed mode. */
+async function saveSection(page: Page) {
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(SAVE_FIRST)).toBeHidden();
 }
 
 /** Open the layout group and pick a layout mode from its select. */
@@ -99,6 +133,7 @@ test.describe("birdseye layout settings @medium", () => {
     await expect(frigateApp.page.getByText("Camera placement")).toBeVisible();
 
     await setGridSize(frigateApp.page, 2, 2);
+    await saveSection(frigateApp.page);
 
     // the top row is one camera, so it is saved as a two column span
     await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
@@ -133,15 +168,44 @@ test.describe("birdseye layout settings @medium", () => {
 
     await selectLayoutMode(frigateApp.page, "Fixed grid");
     await setGridSize(frigateApp.page, 2, 2);
+    await saveSection(frigateApp.page);
 
     await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
-    await expect.poll(() => capture.saveCount(), { timeout: 5_000 }).toBe(1);
+    await expect
+      .poll(() => capture.placementSaveCount(), { timeout: 5_000 })
+      .toBe(1);
 
     // the two cells share a corner, which cannot be composed as one tile
     await paintCell(frigateApp.page, 2, 2, FIRST_CAMERA);
 
     await expect(frigateApp.page.getByText(NOT_A_RECTANGLE)).toBeVisible();
-    expect(capture.saveCount()).toBe(1);
+    expect(capture.placementSaveCount()).toBe(1);
+  });
+
+  test("camera placement waits until the layout itself is saved", async ({
+    frigateApp,
+  }) => {
+    const capture = await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Fixed grid");
+    await setGridSize(frigateApp.page, 2, 2);
+
+    // placement is written onto the cameras as it is painted, so it cannot run
+    // ahead of a grid size and a mode that are still unsaved section data
+    await expect(frigateApp.page.getByText(SAVE_FIRST)).toBeVisible();
+    await expect(
+      frigateApp.page
+        .locator("div.grid")
+        .getByRole("combobox", { name: "Row 1, column 1" }),
+    ).toBeDisabled();
+
+    await saveSection(frigateApp.page);
+
+    await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
+    await expect
+      .poll(() => capture.placementSaveCount(), { timeout: 5_000 })
+      .toBe(1);
   });
 
   test("a drawn layout is saved with the section without a restart", async ({
@@ -155,7 +219,7 @@ test.describe("birdseye layout settings @medium", () => {
 
     // a new layout is drawn full for the number of cameras it is for
     await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
-    await expect(frigateApp.page.getByText("1 camera")).toBeVisible();
+    await expect(frigateApp.page.getByLabel("Cameras shown")).toHaveValue("1");
 
     await frigateApp.page
       .getByRole("button", { name: "Save", exact: true })
@@ -179,6 +243,112 @@ test.describe("birdseye layout settings @medium", () => {
     await expect(frigateApp.page.getByText(RESTART_REQUIRED)).toBeHidden();
   });
 
+  test("a painted drawn layout round trips through the saved rows", async ({
+    frigateApp,
+  }) => {
+    const capture = await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Dynamic");
+    // two clicks, since the count offered is always the lowest unused one
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await expect(
+      frigateApp.page.getByLabel("Cameras shown").last(),
+    ).toHaveValue("2");
+
+    // give the 2-camera layout a second row, then stack the two slots instead
+    // of putting them side by side, which is the cells to rows conversion a
+    // user actually drives. It starts as ["AB"], so A takes the top row and B
+    // the bottom one.
+    await frigateApp.page.getByLabel("Rows").last().fill("2");
+    await frigateApp.page.getByLabel("Rows").last().press("Enter");
+    await paintCell(frigateApp.page, 1, 2, "A");
+    await paintCell(frigateApp.page, 2, 1, "B");
+    await paintCell(frigateApp.page, 2, 2, "B");
+
+    await frigateApp.page
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+
+    await expect
+      .poll(() => capture.capturedConfig(), { timeout: 5_000 })
+      .toMatchObject({
+        config_data: {
+          birdseye: {
+            layout: {
+              layouts: [
+                { cameras: 1, rows: ["A"] },
+                { cameras: 2, rows: ["AA", "BB"] },
+              ],
+            },
+          },
+        },
+      });
+  });
+
+  test("a drawn layout can be pointed at the camera count it is for", async ({
+    frigateApp,
+  }) => {
+    await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Dynamic");
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+
+    // a layout for ten cameras without first creating the nine below it
+    await frigateApp.page.getByLabel("Cameras shown").fill("10");
+    await frigateApp.page.getByLabel("Cameras shown").press("Enter");
+
+    await expect(frigateApp.page.getByLabel("Cameras shown")).toHaveValue("10");
+    // the slots follow the count, so nine of them are not on the grid yet
+    await expect(frigateApp.page.getByText(MISSING_SLOTS)).toBeVisible();
+
+    // a count that already has a layout would collide with it, so it is
+    // refused. The cards are ordered by count, so the new one comes first.
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await expect(
+      frigateApp.page.getByLabel("Cameras shown").first(),
+    ).toHaveValue("1");
+
+    await frigateApp.page.getByLabel("Cameras shown").first().fill("10");
+    await frigateApp.page.getByLabel("Cameras shown").first().press("Enter");
+
+    await expect(
+      frigateApp.page.getByLabel("Cameras shown").first(),
+    ).toHaveValue("1");
+  });
+
+  test("a drawn layout can be removed again", async ({ frigateApp }) => {
+    const capture = await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Dynamic");
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await expect(
+      frigateApp.page.getByLabel("Cameras shown").last(),
+    ).toHaveValue("2");
+
+    await frigateApp.page
+      .getByRole("button", { name: /Remove the layout for/ })
+      .last()
+      .click();
+    await expect(frigateApp.page.getByLabel("Cameras shown")).toHaveCount(1);
+
+    await frigateApp.page
+      .getByRole("button", { name: "Save", exact: true })
+      .click();
+
+    await expect
+      .poll(() => capture.capturedConfig(), { timeout: 5_000 })
+      .toMatchObject({
+        config_data: {
+          birdseye: { layout: { layouts: [{ cameras: 1, rows: ["A"] }] } },
+        },
+      });
+  });
+
   test("a drawn layout with an unplaced slot cannot be saved", async ({
     frigateApp,
   }) => {
@@ -187,7 +357,7 @@ test.describe("birdseye layout settings @medium", () => {
 
     await selectLayoutMode(frigateApp.page, "Dynamic");
     await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
-    await expect(frigateApp.page.getByText("1 camera")).toBeVisible();
+    await expect(frigateApp.page.getByLabel("Cameras shown")).toHaveValue("1");
 
     // taking the only slot off the grid leaves the layout short of a slot,
     // which the backend rejects, failing the whole section save with it

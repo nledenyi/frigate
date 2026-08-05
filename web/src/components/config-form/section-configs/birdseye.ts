@@ -31,7 +31,12 @@ const birdseye: SectionConfigOverrides = {
       },
       // placement is painted on the grid in the global Birdseye settings, the
       // same way the camera order is, so the values behind it are kept but
-      // not shown as fields
+      // not shown as fields.
+      //
+      // Deliberately not hiddenFields, which the order above does use:
+      // sanitizeSectionData unsets a hidden field, which is right for a value
+      // nothing in this section writes, and wrong here, since a save would
+      // then drop the placement that was just painted.
       cell: {
         "ui:widget": "hidden",
       },

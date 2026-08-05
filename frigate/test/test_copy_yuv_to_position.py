@@ -52,6 +52,31 @@ class TestCopyYuvToPosition(TestCase):
     # cv2.imwrite(f"source_frame_yuv.jpg", self.source_yuv_frame)
     # cv2.imwrite(f"dest_frame_yuv.jpg", self.dest_yuv_frame)
 
+    def test_letterboxed_source_is_centered(self):
+        """Test a source that cannot fill its cell sits between equal bars.
+
+        The cell is square and the source is 2:1, so it is drawn 400x200 with
+        200 rows of slack to share between the top and the bottom.
+        """
+        copy_yuv_to_position(
+            self.dest_yuv_frame,
+            (0, 0),
+            (400, 400),
+            self.source_yuv_frame,
+            self.source_channel_dims,
+        )
+
+        # everything outside the drawn image was cleared to the black level
+        luma = self.dest_yuv_frame[0:400, 0:400]
+        drawn = np.flatnonzero(luma.max(axis=1) > 16)
+        top_bar = int(drawn[0])
+        bottom_bar = 400 - int(drawn[-1]) - 1
+
+        # the offsets are snapped to a multiple of 4, so they can differ by that
+        assert abs(top_bar - bottom_bar) <= 4, (
+            f"image is not centered: {top_bar} above, {bottom_bar} below"
+        )
+
     def test_copy_position_full_screen(self):
         copy_yuv_to_position(
             self.dest_yuv_frame,

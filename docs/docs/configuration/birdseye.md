@@ -195,17 +195,20 @@ The grid is defined once with `cols` and `rows`, and each camera is placed with 
 
 Navigate to <NavPath path="Settings > System > Birdseye" /> and set **Layout > Layout mode** to `Fixed grid`.
 
-| Field                  | Description                                                                                 |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| **Columns** / **Rows** | Size of the grid the cameras are placed on                                                  |
-| **Camera placement**   | Which camera fills each cell; neighboring cells with the same camera become one larger tile |
+| Field                  | Default | Description                                                                                 |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| **Columns** / **Rows** | 4 / 4   | Size of the grid the cameras are placed on                                                  |
+| **Camera placement**   | empty   | Which camera fills each cell; neighboring cells with the same camera become one larger tile |
 
-Placement is saved as it is edited, since it is stored on the cameras rather than in this section.
+Placement is stored on the cameras rather than in this section, so it is saved as it is
+edited rather than with the Save button. That also means the grid it is painted on has to
+exist first: the layout mode and the grid size are saved with the section, and placement
+stays locked until they are.
 
 </TabItem>
 <TabItem value="yaml">
 
-```yaml {3-6,11-13,16-17}
+```yaml {5-8,11-17}
 birdseye:
   enabled: True
   # a fixed layout only fills every cell if all cameras are always shown
@@ -249,10 +252,11 @@ Each layout says how many cameras it is drawn for and is drawn as a list of rows
 
 Navigate to <NavPath path="Settings > System > Birdseye" /> and set **Layout > Layout mode** to `Dynamic`.
 
-| Field                 | Description                                                                              |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| **Layouts**           | One drawn grid per number of cameras being shown; each cell picks the slot it belongs to |
-| **Layout dwell time** | Seconds a layout is kept before the view is laid out again                               |
+| Field                 | Default | Description                                                                              |
+| --------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| **Layouts**           | none    | One drawn grid per number of cameras being shown; each cell picks the slot it belongs to |
+| **Cameras shown**     | -       | How many cameras being shown a layout is drawn for; each count can have one layout       |
+| **Layout dwell time** | 0       | Seconds a layout is kept before the view is laid out again                               |
 
 </TabItem>
 <TabItem value="yaml">

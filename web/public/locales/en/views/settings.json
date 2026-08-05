@@ -1857,7 +1857,8 @@
     "layoutBuilder": {
       "fixed": {
         "label": "Camera placement",
-        "description": "Choose which camera fills each cell. Give a camera several neighboring cells to make its tile larger. Placement is saved as you edit it."
+        "description": "Choose which camera fills each cell. Give a camera several neighboring cells to make its tile larger. Placement is saved as you edit it.",
+        "saveFirst": "Save the layout mode and grid size before placing cameras, since placement is saved as you paint it."
       },
       "emptyCell": "Empty",
       "cell": "Row {{row}}, column {{col}}",
@@ -1869,11 +1870,13 @@
         "description": "Draw a layout for each number of cameras being shown. Slots are filled in order with the cameras being shown."
       },
       "addLayout": "Add layout",
-      "cameraCount": "{{count}} cameras",
-      "removeLayout": "Remove layout",
+      "camerasShown": "Cameras shown",
+      "removeLayout_one": "Remove the layout for {{count}} camera",
+      "removeLayout_other": "Remove the layout for {{count}} cameras",
       "missingSlots": "These slots are not on the grid yet: {{slots}}",
-      "cameraCount_one": "{{count}} camera",
-      "cameraCount_other": "{{count}} cameras"
+      "saving": "Saving…",
+      "saved": "Saved",
+      "notARectangleCameras": "These cameras are not painted as a rectangle:"
     },
     "layoutMode": {
       "auto": "Automatic",

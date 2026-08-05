@@ -398,10 +398,12 @@ class BirdsEyeFrameManager:
         self.warn_about_layout()
 
     def warn_about_camera_once(self, key: tuple[str, str], message: str) -> None:
-        """Report a camera that cannot be placed, once per layout edit.
+        """Report a problem with a fixed layout, once per layout edit.
 
         A fixed layout is rebuilt every time the cameras being shown change, so
         warning from the layout itself would repeat for as long as it is wrong.
+        The key is what makes two reports the same one, usually the problem and
+        the camera it is about.
         """
         if key in self.warned_fixed_cameras:
             return
@@ -541,16 +543,6 @@ class BirdsEyeFrameManager:
         Returns (frame_changed, layout_changed) to indicate if the frame or layout changed.
         """
 
-        # a layout edited in the settings is published to this process, so the
-        # layout it replaces has to be dropped even when the same cameras are
-        # being shown
-        layout_settings = self.get_layout_settings()
-        layout_settings_changed = layout_settings != self.layout_settings
-
-        if layout_settings_changed:
-            logger.debug("Birdseye layout settings changed")
-            self.apply_layout_settings(layout_settings)
-
         # determine how many cameras are tracking objects within the last inactivity_threshold seconds
         active_cameras: set[str] = set(
             [
@@ -598,11 +590,23 @@ class BirdsEyeFrameManager:
         layout_changed = False
 
         # If no active cameras and layout is already empty, no update needed
+        if len(active_cameras) == 0 and len(self.camera_layout) == 0:
+            return False, False
+
+        # a layout edited in the settings is published to this process, so the
+        # layout it replaces has to be dropped even when the same cameras are
+        # being shown. There is nothing to drop while nothing is drawn, so this
+        # is read here rather than above the early return, where it would be
+        # rebuilt and compared for every frame of an idle wall.
+        layout_settings = self.get_layout_settings()
+        layout_settings_changed = layout_settings != self.layout_settings
+
+        if layout_settings_changed:
+            logger.debug("Birdseye layout settings changed")
+            self.apply_layout_settings(layout_settings)
+
         if len(active_cameras) == 0:
-            # if the layout is already cleared
-            if len(self.camera_layout) == 0:
-                return False, False
-            # if the layout needs to be cleared
+            # the layout needs to be cleared
             self.camera_layout = []
             self.active_cameras = set()
             self.layout_camera_order = []
@@ -680,8 +684,9 @@ class BirdsEyeFrameManager:
                             )
                             leave_canvas_empty = True
                         else:
-                            logger.error(
-                                "Fixed birdseye layout produced no tiles, falling back to the automatic layout"
+                            self.warn_about_camera_once(
+                                ("no tiles", ""),
+                                "Birdseye layout is 'fixed' but no camera has a cell, using the automatic layout",
                             )
                 elif self.config.birdseye.layout.mode == BirdseyeLayoutModeEnum.dynamic:
                     configured = self.dynamic_layout(active_cameras_to_add)

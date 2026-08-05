@@ -804,7 +804,10 @@ def copy_yuv_to_position(
         uv_resize_width = int(y_resize_width // 2)
         uv_resize_height = int(y_resize_height // 4)
 
-        y_y_offset = int((destination_shape[0] - y_resize_height) / 4 // 4 * 4)
+        # half the slack goes above the image and half below it, the same way
+        # the horizontal offset splits it left and right. The // 4 * 4 that
+        # follows is the alignment the chroma planes need, not the centering.
+        y_y_offset = int((destination_shape[0] - y_resize_height) / 2 // 4 * 4)
         y_x_offset = int((destination_shape[1] - y_resize_width) / 2 // 4 * 4)
 
         uv_y_offset = y_y_offset // 4

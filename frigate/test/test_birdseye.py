@@ -1,5 +1,6 @@
 """Test camera user and password cleanup."""
 
+import logging
 import multiprocessing as mp
 import os
 import tempfile
@@ -324,6 +325,51 @@ class TestBirdseyeDynamicLayout(unittest.TestCase):
 
         assert self.layout() == before
 
+    def test_slots_are_filled_in_the_camera_order(self):
+        """Test the order decides which camera lands in which slot."""
+        self.manager.update_frame()
+        before = self.layout()
+
+        # the cameras are tied on order, so this puts side first instead of last
+        self.config.cameras["side"].birdseye.order = -1
+        self.manager.update_frame()
+
+        # side now fills the slot back had, and back takes the one side left
+        assert self.layout()["side"] == before["back"]
+        assert self.layout()["back"] == before["front"]
+
+    def test_dwell_expires_and_the_layout_follows(self):
+        """Test the view is laid out again once the dwell time has passed."""
+        self.config.birdseye.layout.dwell = 60
+        self.manager.update_frame()
+        before = self.layout()
+
+        self.deactivate("side")
+        self.manager.update_frame()
+        assert self.layout() == before
+
+        # the layout was drawn longer ago than the dwell time, which is what
+        # the hold branch compares against
+        self.manager.last_layout_time -= 61
+        self.manager.update_frame()
+
+        assert "side" not in self.layout()
+
+    def test_an_undrawn_count_is_reported_again_after_an_edit(self):
+        """Test editing the layouts starts the reporting over."""
+        self.deactivate("side")
+        self.deactivate("front")
+
+        with self.assertLogs("frigate.output.birdseye", level="WARNING") as logs:
+            self.manager.update_frame()
+            # the same count again is not worth a second line
+            self.manager.update_frame()
+            self.config.birdseye.layout.scaling_factor = 3.0
+            self.manager.update_frame()
+
+        reported = [line for line in logs.output if "is drawn for" in line]
+        assert len(reported) == 2
+
     def test_dwell_does_not_hold_a_camera_that_was_switched_off(self):
         """Test a camera taken out of birdseye leaves the wall right away."""
         self.config.birdseye.layout.dwell = 60
@@ -486,6 +532,29 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
         assert len([line for line in logs.output if "has no cell" in line]) == 1
 
 
+class TestBirdseyeLayoutWarnings(unittest.TestCase):
+    """Test the settings a layout mode quietly ignores are reported."""
+
+    def test_max_cameras_is_reported_as_ignored(self):
+        """Test a fixed layout says up front that max_cameras does not apply."""
+        with self.assertLogs("frigate.output.birdseye", level="WARNING") as logs:
+            build_manager(
+                {"mode": "fixed", "cols": 2, "rows": 2, "max_cameras": 2},
+                {"back": {"cell": (0, 0)}, "front": {"cell": (1, 0)}},
+            )
+
+        assert any("max_cameras" in line for line in logs.output)
+
+    def test_the_automatic_layout_keeps_max_cameras(self):
+        """Test the one mode max_cameras does apply to is not warned about."""
+        with self.assertLogs("frigate.output.birdseye", level="WARNING") as logs:
+            build_manager({"mode": "auto", "max_cameras": 2}, {"back": {}, "front": {}})
+            # assertLogs needs a record, and this test is about the absence
+            logging.getLogger("frigate.output.birdseye").warning("nothing ignored")
+
+        assert not any("max_cameras" in line for line in logs.output)
+
+
 class TestBirdseyeLayoutSettingsChanges(unittest.TestCase):
     """Test a layout edited in the settings is applied without a restart."""
 
@@ -580,14 +649,22 @@ class TestBirdseyeLayoutSettingsChanges(unittest.TestCase):
         assert not layout_changed
 
     def test_scaling_factor_change_is_picked_up(self):
-        """Test the canvas takes a scaling factor that was edited."""
+        """Test an edited scaling factor actually changes the tiles.
+
+        The attribute alone proves nothing: it is set on the first line of
+        apply_layout_settings whether or not anything acts on it. What makes
+        the change visible is dropping the coefficient cached for this camera
+        count, so the layout is searched again instead of reused.
+        """
         self.config.birdseye.layout.mode = "auto"
         self.manager.update_frame()
+        before = layout_rects(self.manager)
 
         self.config.birdseye.layout.scaling_factor = 3.0
         self.manager.update_frame()
 
         assert self.manager.canvas.scaling_factor == 3.0
+        assert layout_rects(self.manager) != before
 
 
 class TestBirdseyeLayoutSaving(unittest.TestCase):
