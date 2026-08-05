@@ -22,7 +22,8 @@ Each camera tile in Birdseye is composed from the frames of the stream assigned 
 
 Birdseye offers different modes to customize which cameras show under which circumstances.
 
-- **continuous:** All cameras are always included
+- **continuous:** All cameras are always included, whether or not they are still sending anything
+- **online:** Every camera that is still sending a stream is included. A camera that goes offline is dropped once nothing has arrived from it for `inactivity_threshold` seconds, which pairs with the `dynamic` layout mode below: the view lays itself out again for the number of cameras that are actually up
 - **motion:** Cameras that have detected motion within the last 30 seconds are included
 - **objects:** Cameras that have tracked an active object within the last 30 seconds are included
 
@@ -44,7 +45,7 @@ To include a camera in Birdseye view only for specific circumstances, or exclude
 | Field               | Description                                                   |
 | ------------------- | ------------------------------------------------------------- |
 | **Enable Birdseye** | Whether this camera appears in Birdseye view                  |
-| **Tracking mode**   | When to show the camera: `continuous`, `motion`, or `objects` |
+| **Tracking mode**   | When to show the camera: `continuous`, `online`, `motion`, or `objects` |
 
 </TabItem>
 <TabItem value="yaml">

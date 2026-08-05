@@ -251,10 +251,12 @@ birdseye:
   # Optional: Encoding quality of the mpeg1 feed (default: shown below)
   # 1 is the highest quality, and 31 is the lowest. Lower quality feeds utilize less CPU resources.
   quality: 8
-  # Optional: Mode of the view. Available options are: objects, motion, and continuous
+  # Optional: Mode of the view. Available options are: objects, motion, continuous, and online
   #   objects - cameras are included if they have had a tracked object within the last 30 seconds
   #   motion - cameras are included if motion was detected in the last 30 seconds
-  #   continuous - all cameras are included always
+  #   continuous - all cameras are included always, whether or not they are still sending
+  #   online - cameras are included while they are still sending a stream, and dropped once
+  #            nothing has arrived from one for inactivity_threshold seconds
   mode: objects
   # Optional: Threshold for camera activity to stop showing camera (default: shown below)
   inactivity_threshold: 30

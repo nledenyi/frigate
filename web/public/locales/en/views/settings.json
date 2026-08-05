@@ -1845,7 +1845,8 @@
     "trackingMode": {
       "objects": "Objects",
       "motion": "Motion",
-      "continuous": "Continuous"
+      "continuous": "Continuous",
+      "online": "Online"
     },
     "cameraOrder": {
       "label": "Camera order",

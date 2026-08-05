@@ -71,6 +71,9 @@ class BirdseyeModeEnum(str, Enum):
     objects = "objects"
     motion = "motion"
     continuous = "continuous"
+    # appended rather than ordered with continuous, since get_index below hands
+    # out the position in this list
+    online = "online"
 
     @classmethod
     def get_index(cls, type):
@@ -183,7 +186,7 @@ class BirdseyeConfig(FrigateBaseModel):
     mode: BirdseyeModeEnum = Field(
         default=BirdseyeModeEnum.objects,
         title="Tracking mode",
-        description="Mode for including cameras in Birdseye: 'objects', 'motion', or 'continuous'.",
+        description="Mode for including cameras in Birdseye: 'objects', 'motion', 'continuous', or 'online' for every camera that is still sending a stream.",
     )
 
     restream: bool = Field(
@@ -238,7 +241,7 @@ class BirdseyeCameraConfig(BaseModel):
     mode: BirdseyeModeEnum = Field(
         default=BirdseyeModeEnum.objects,
         title="Tracking mode",
-        description="Mode for including cameras in Birdseye: 'objects', 'motion', or 'continuous'.",
+        description="Mode for including cameras in Birdseye: 'objects', 'motion', 'continuous', or 'online' for every camera that is still sending a stream.",
     )
 
     order: int = Field(

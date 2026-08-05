@@ -460,6 +460,10 @@ class BirdsEyeFrameManager:
             "last_active_frame": 0.0,
             "current_frame": 0.0,
             "layout_frame": 0.0,
+            # when a frame last arrived, by the clock rather than by the time
+            # carried in the frame, so a camera that stops sending can be told
+            # apart from one that is simply idle
+            "last_frame_arrival": 0.0,
             "channel_dims": {
                 "y": y,
                 "u1": u1,
@@ -509,10 +513,27 @@ class BirdsEyeFrameManager:
             channel_dims,
         )
 
+    def camera_streaming(self, cam_data: dict[str, Any], now: float) -> bool:
+        """Whether a camera is still sending frames.
+
+        The times carried in the frames themselves cannot answer this: they only
+        move when a frame arrives, so they freeze together when one stops and
+        every comparison between them freezes with them. This is the arrival
+        time instead, taken from the clock.
+        """
+        last_arrival: float = cam_data["last_frame_arrival"]
+        return now - last_arrival < self.config.birdseye.inactivity_threshold
+
     def camera_active(
         self, mode: Any, object_box_count: int, motion_box_count: int
     ) -> bool:
         if mode == BirdseyeModeEnum.continuous:
+            return True
+
+        # whether the stream is still arriving is decided per frame, in
+        # update_frame, since nothing arriving is exactly the case that never
+        # reaches this
+        if mode == BirdseyeModeEnum.online:
             return True
 
         if mode == BirdseyeModeEnum.motion and motion_box_count > 0:
@@ -544,6 +565,7 @@ class BirdsEyeFrameManager:
         """
 
         # determine how many cameras are tracking objects within the last inactivity_threshold seconds
+        now = datetime.datetime.now().timestamp()
         active_cameras: set[str] = set(
             [
                 cam
@@ -555,6 +577,10 @@ class BirdsEyeFrameManager:
                 and cam_data["last_active_frame"] > 0
                 and cam_data["current_frame_time"] - cam_data["last_active_frame"]
                 < self.config.birdseye.inactivity_threshold
+                and (
+                    self.config.cameras[cam].birdseye.mode != BirdseyeModeEnum.online
+                    or self.camera_streaming(cam_data, now)
+                )
             ]
         )
         logger.debug(f"Active cameras: {active_cameras}")
@@ -568,8 +594,6 @@ class BirdsEyeFrameManager:
         )
         max_camera_refresh = False
         if max_cameras:
-            now = datetime.datetime.now().timestamp()
-
             if len(active_cameras) == max_cameras and now - self.last_refresh_time < 10:
                 # don't refresh cameras too often
                 active_cameras = self.active_cameras
@@ -1084,13 +1108,14 @@ class BirdsEyeFrameManager:
             else:
                 return False, False
 
+        now = datetime.datetime.now().timestamp()
+
         # update the last active frame for the camera
         self.cameras[camera]["current_frame"] = frame.copy()
         self.cameras[camera]["current_frame_time"] = frame_time
+        self.cameras[camera]["last_frame_arrival"] = now
         if self.camera_active(camera_config.birdseye.mode, object_count, motion_count):
             self.cameras[camera]["last_active_frame"] = frame_time
-
-        now = datetime.datetime.now().timestamp()
 
         # limit output to 10 fps
         if not force_update and (now - self.last_output_time) < 1 / 10:

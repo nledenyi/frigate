@@ -1,5 +1,6 @@
 """Test camera user and password cleanup."""
 
+import datetime
 import logging
 import multiprocessing as mp
 import os
@@ -14,6 +15,7 @@ from frigate.config.camera.birdseye import (
     BirdseyeConfig,
     BirdseyeDrawnLayoutConfig,
     BirdseyeLayoutConfig,
+    BirdseyeModeEnum,
     parse_layout_slots,
 )
 from frigate.output.birdseye import BirdsEyeFrameManager, get_canvas_shape
@@ -46,7 +48,7 @@ PLACED_CONFIG = SAVING_CONFIG.replace(
 
 
 def build_manager(
-    layout: dict, cameras: dict[str, dict]
+    layout: dict, cameras: dict[str, dict], birdseye_mode: str = "continuous"
 ) -> tuple[FrigateConfig, BirdsEyeFrameManager]:
     """Build a frame manager showing every camera with nothing to draw.
 
@@ -56,7 +58,7 @@ def build_manager(
     config = FrigateConfig(
         **{
             "mqtt": {"enabled": False},
-            "birdseye": {"enabled": True, "mode": "continuous", "layout": layout},
+            "birdseye": {"enabled": True, "mode": birdseye_mode, "layout": layout},
             "cameras": {
                 camera: {
                     "birdseye": birdseye,
@@ -530,6 +532,61 @@ class TestBirdseyeFixedLayout(unittest.TestCase):
             self.manager.update_frame()
 
         assert len([line for line in logs.output if "has no cell" in line]) == 1
+
+
+class TestBirdseyeOnlineMode(unittest.TestCase):
+    """Test the tracking mode that only shows cameras that are streaming."""
+
+    def build(self, mode: str) -> tuple[FrigateConfig, BirdsEyeFrameManager]:
+        config, manager = build_manager(
+            {"mode": "dynamic", "layouts": [{"cameras": 3, "rows": ["AAB", "AAC"]}]},
+            {"back": {}, "front": {}, "side": {}},
+            birdseye_mode=mode,
+        )
+        # every camera has just sent a frame
+        now = datetime.datetime.now().timestamp()
+        for camera_data in manager.cameras.values():
+            camera_data["last_frame_arrival"] = now
+
+        return config, manager
+
+    def stop_sending(self, manager: BirdsEyeFrameManager, camera: str) -> None:
+        """Age a camera out the way a camera that lost power does."""
+        manager.cameras[camera]["last_frame_arrival"] -= (
+            manager.config.birdseye.inactivity_threshold + 1
+        )
+
+    def test_a_camera_that_stopped_streaming_is_dropped(self):
+        """Test the view is laid out again without the camera that went away."""
+        _, manager = self.build("online")
+        manager.update_frame()
+        assert sorted(layout_rects(manager)) == ["back", "front", "side"]
+
+        self.stop_sending(manager, "side")
+        manager.update_frame()
+
+        assert sorted(layout_rects(manager)) == ["back", "front"]
+
+    def test_continuous_keeps_a_camera_that_stopped_streaming(self):
+        """Test the existing modes are left exactly as they were."""
+        _, manager = self.build("continuous")
+        manager.update_frame()
+
+        self.stop_sending(manager, "side")
+        manager.update_frame()
+
+        assert sorted(layout_rects(manager)) == ["back", "front", "side"]
+
+    def test_a_camera_can_be_put_in_online_mode_on_its_own(self):
+        """Test the mode can be overridden for a single camera."""
+        config, manager = self.build("continuous")
+        config.cameras["side"].birdseye.mode = BirdseyeModeEnum.online
+        manager.update_frame()
+
+        self.stop_sending(manager, "side")
+        manager.update_frame()
+
+        assert sorted(layout_rects(manager)) == ["back", "front"]
 
 
 class TestBirdseyeLayoutWarnings(unittest.TestCase):
