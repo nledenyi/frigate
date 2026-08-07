@@ -178,6 +178,54 @@ class TestUpdateYaml(unittest.TestCase):
         assert data["cameras"]["cam1"]["detect"]["fps"] == 5
         assert "# tuned for the pi" in self._read()
 
+    def test_delete_missing_key_is_a_no_op(self):
+        """Clearing a key the file does not have leaves the file as it was.
+
+        A client that asks for a key to be absent has nothing to do when it
+        already is, and walking the path would otherwise write out the empty
+        parents it was about to delete from.
+        """
+        self._write("cameras:\n  cam1:\n    detect:\n      fps: 4\n")
+        before = self._read()
+
+        update_yaml_file_bulk(self.config_path, {"cameras.cam1.birdseye.cell": ""})
+
+        assert self._read() == before
+
+    def test_delete_missing_key_keeps_the_rest_of_the_payload(self):
+        """One clear of an absent key does not discard the whole bulk update.
+
+        Every key is applied to the same document before it is written once,
+        so a raise part way through used to lose the updates that came before
+        it as well as the ones after.
+        """
+        self._write("cameras:\n  cam1:\n    detect:\n      fps: 4\n  cam2:\n")
+
+        update_yaml_file_bulk(
+            self.config_path,
+            {
+                "cameras.cam1.detect.fps": 5,
+                "cameras.cam1.birdseye.cell": "",
+                "cameras.cam2.detect.fps": 6,
+            },
+        )
+
+        data = self._load()
+        assert data["cameras"]["cam1"]["detect"]["fps"] == 5
+        assert data["cameras"]["cam2"]["detect"]["fps"] == 6
+        assert "birdseye" not in data["cameras"]["cam1"]
+
+    def test_delete_missing_list_item_is_a_no_op(self):
+        """The same holds for an index that is past the end of a list."""
+        self._write(
+            "cameras:\n  cam1:\n    motion:\n      mask:\n        - 0,0.4,0.2,0.4\n"
+        )
+        before = self._read()
+
+        update_yaml_file_bulk(self.config_path, {"cameras.cam1.motion.mask.3": ""})
+
+        assert self._read() == before
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

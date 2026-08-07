@@ -312,7 +312,37 @@ def clear_orphaned_comments(collection, parent, parent_key) -> None:
         parent.ca.items.pop(parent_key, None)
 
 
+def yaml_path_exists(data, key_path) -> bool:
+    """Report whether a key path is present, creating nothing on the way."""
+    temp = data
+
+    for key in key_path:
+        if isinstance(key, tuple):
+            if not isinstance(temp, dict) or key[0] not in temp:
+                return False
+
+            collection = temp[key[0]]
+
+            if not isinstance(collection, list) or len(collection) <= key[1]:
+                return False
+
+            temp = collection[key[1]]
+        else:
+            if not isinstance(temp, dict) or key not in temp:
+                return False
+
+            temp = temp[key]
+
+    return True
+
+
 def update_yaml(data, key_path, new_value):
+    # asking for a key to be absent has nothing to do when it already is, and
+    # the walk below would otherwise create the empty parents it was about to
+    # delete from and then raise, losing every other update in the same payload
+    if new_value == "" and not yaml_path_exists(data, key_path):
+        return data
+
     temp = data
     parent = None
     parent_key = None
