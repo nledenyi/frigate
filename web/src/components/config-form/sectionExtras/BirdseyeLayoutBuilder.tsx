@@ -35,7 +35,9 @@ const EMPTY_CELL = "empty";
 // what a cell holds is a camera name or a slot letter, either of which could be
 // the word "empty", so the two are kept apart by prefixing rather than by hoping
 const SLOT_VALUE = "slot:";
-const MAX_GRID_SIDE = 12;
+// the same bound the config puts on layout.cols and layout.rows, so a grid
+// that is valid in the config can also be painted here
+const MAX_GRID_SIDE = 16;
 const SLOT_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 type SaveStatus = "idle" | "saving" | "saved";

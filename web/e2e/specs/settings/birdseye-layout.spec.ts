@@ -28,6 +28,7 @@ const NOT_A_RECTANGLE = /not painted as a rectangle/;
 const MISSING_SLOTS = /not on the grid yet/;
 const SAVE_FIRST = /before placing cameras/;
 const RESTART_REQUIRED = /Restart Frigate to apply/;
+const SAVE_FAILED = /Failed to save config changes/;
 
 /** Merge a saved section into the config the way the backend would. */
 function mergeInto(target: Record<string, unknown>, source: object) {
@@ -51,6 +52,7 @@ async function installRoutes(page: Page) {
   let lastSavedConfig: unknown = null;
   let saveCount = 0;
   let placementSaveCount = 0;
+  let rejectPlacement = false;
 
   await page.route("**/api/config/schema.json", (route) =>
     route.fulfill({ json: CONFIG_SCHEMA }),
@@ -67,6 +69,16 @@ async function installRoutes(page: Page) {
     saveCount += 1;
     if (body?.update_topic === "config/cameras/*/birdseye") {
       placementSaveCount += 1;
+
+      // a placement the backend refuses has to leave the config alone, the
+      // same way a rejected save does
+      if (rejectPlacement) {
+        await route.fulfill({
+          status: 400,
+          json: { success: false, message: "cell is already taken" },
+        });
+        return;
+      }
     }
     // the builder reads the saved layout back to decide whether it can be
     // painted on, so a save has to be visible to the next config read
@@ -83,6 +95,9 @@ async function installRoutes(page: Page) {
     capturedConfig: () => lastSavedConfig,
     saveCount: () => saveCount,
     placementSaveCount: () => placementSaveCount,
+    rejectPlacement: (value = true) => {
+      rejectPlacement = value;
+    },
   };
 }
 
@@ -108,6 +123,13 @@ async function setGridSize(page: Page, cols: number, rows: number) {
   await page.getByLabel("Rows").press("Enter");
 }
 
+/** Address a cell of the grid the way it is announced. */
+function cell(page: Page, row: number, col: number) {
+  return page
+    .locator("div.grid")
+    .getByRole("combobox", { name: `Row ${row}, column ${col}` });
+}
+
 /** Paint a cell of the grid, addressed the way it is announced. */
 async function paintCell(
   page: Page,
@@ -115,10 +137,7 @@ async function paintCell(
   col: number,
   option: string | RegExp,
 ) {
-  await page
-    .locator("div.grid")
-    .getByRole("combobox", { name: `Row ${row}, column ${col}` })
-    .click();
+  await cell(page, row, col).click();
   await page.getByRole("option", { name: option }).click();
 }
 
@@ -367,5 +386,47 @@ test.describe("birdseye layout settings @medium", () => {
     await expect(
       frigateApp.page.getByRole("button", { name: "Save", exact: true }),
     ).toBeDisabled();
+  });
+
+  test("a rejected placement is reported and taken back off the grid", async ({
+    frigateApp,
+  }) => {
+    const capture = await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Fixed grid");
+    await setGridSize(frigateApp.page, 2, 2);
+    await saveSection(frigateApp.page);
+
+    await paintCell(frigateApp.page, 1, 1, FIRST_CAMERA);
+    await expect
+      .poll(() => capture.placementSaveCount(), { timeout: 5_000 })
+      .toBe(1);
+
+    capture.rejectPlacement();
+    await paintCell(frigateApp.page, 2, 1, FIRST_CAMERA);
+
+    await expect(frigateApp.page.getByText(SAVE_FAILED)).toBeVisible();
+
+    // the grid cannot keep showing a placement the config does not have, so
+    // the painted cell goes back to what was last saved
+    await expect(cell(frigateApp.page, 2, 1)).toHaveText("-");
+    await expect(cell(frigateApp.page, 1, 1)).not.toHaveText("-");
+  });
+
+  test("the grid can be painted as wide as the config allows", async ({
+    frigateApp,
+  }) => {
+    await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Fixed grid");
+    // the config allows up to 16 columns and rows, so a grid that size has to
+    // be paintable rather than clamped to something narrower
+    await setGridSize(frigateApp.page, 16, 16);
+
+    await expect(frigateApp.page.getByLabel("Columns")).toHaveValue("16");
+    await expect(frigateApp.page.getByLabel("Rows")).toHaveValue("16");
+    await expect(cell(frigateApp.page, 16, 16)).toBeVisible();
   });
 });
