@@ -262,6 +262,25 @@ test.describe("birdseye layout settings @medium", () => {
     await expect(frigateApp.page.getByText(RESTART_REQUIRED)).toBeHidden();
   });
 
+  test("a new layout is seeded on a square grid", async ({ frigateApp }) => {
+    await installRoutes(frigateApp.page);
+    await frigateApp.goto(SETTINGS_URL);
+
+    await selectLayoutMode(frigateApp.page, "Dynamic");
+
+    // Two cameras were seeded as 2x1, whose cells are 8:9 on a 16:9 canvas and
+    // letterbox both cameras before anything has been painted. Only a square
+    // grid gives cells the aspect ratio of the canvas itself.
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+    await frigateApp.page.getByRole("button", { name: "Add layout" }).click();
+
+    await expect(
+      frigateApp.page.getByLabel("Cameras shown").last(),
+    ).toHaveValue("2");
+    await expect(frigateApp.page.getByLabel("Columns").last()).toHaveValue("2");
+    await expect(frigateApp.page.getByLabel("Rows").last()).toHaveValue("2");
+  });
+
   test("a painted drawn layout round trips through the saved rows", async ({
     frigateApp,
   }) => {
@@ -276,10 +295,9 @@ test.describe("birdseye layout settings @medium", () => {
       frigateApp.page.getByLabel("Cameras shown").last(),
     ).toHaveValue("2");
 
-    // give the 2-camera layout a second row, then stack the two slots instead
-    // of putting them side by side, which is the cells to rows conversion a
-    // user actually drives. It starts as ["AB"], so A takes the top row and B
-    // the bottom one.
+    // stack the two slots instead of putting them side by side, which is the
+    // cells to rows conversion a user actually drives. It starts as
+    // ["AB", ".."], so A takes the top row and B the bottom one.
     await frigateApp.page.getByLabel("Rows").last().fill("2");
     await frigateApp.page.getByLabel("Rows").last().press("Enter");
     await paintCell(frigateApp.page, 1, 2, "A");

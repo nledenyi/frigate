@@ -597,8 +597,14 @@ function DynamicLayoutsBuilder({
   const handleAdd = () => {
     if (!nextCount) return;
 
-    const cols = Math.ceil(Math.sqrt(nextCount));
-    const rows = Math.ceil(nextCount / cols);
+    // A square grid is what makes every cell the same aspect ratio as the
+    // canvas, so tiles drawn on square spans are not letterboxed. Filling the
+    // rows only as far as the count needs would give, say, 4x3 for ten
+    // cameras, whose cells are 4:3 on a 16:9 canvas and letterbox every
+    // camera on it.
+    const side = Math.ceil(Math.sqrt(nextCount));
+    const cols = side;
+    const rows = side;
 
     onChange([
       ...layouts,

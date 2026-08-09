@@ -274,13 +274,13 @@ birdseye:
       - cameras: 1
         rows: ["A"]
       - cameras: 2
-        rows: ["AB"]
+        rows: ["AB", ".."]
       - cameras: 3
-        rows: ["AB", "CC"]
+        rows: ["AB", "C."]
       - cameras: 4
         rows: ["AB", "CD"]
       - cameras: 5
-        rows: ["AAB", "AAC", "DDE"]
+        rows: ["AAB", "AAC", "DE."]
       - cameras: 6
         rows: ["AAB", "AAC", "DEF"]
 ```
@@ -293,6 +293,7 @@ The layout for six cameras above gives the first camera a 2x2 tile in the top le
 Notes on dynamic layouts:
 
 - A layout has to have exactly as many slots as the number of cameras it is drawn for, and each slot has to be a rectangle. Frigate reports the layout as a config error otherwise, and it does the same for two layouts drawn for the same number of cameras.
+- A tile is letterboxed unless its shape matches its camera's, and the shape a slot gets is decided by the grid it is drawn on: a slot spanning `w` columns and `h` rows is only as wide as the canvas is tall when `w / h` equals `cols / rows`. The simplest way to satisfy that for every slot at once is to **draw on a square grid and give every slot a square span**, which makes each slot the same shape as the canvas however large it is. A layout drawn for ten cameras on a 4x3 grid has 4:3 cells, so on the usual 16:9 canvas it letterboxes every camera and gives up a fifth of the frame; the same ten cameras on a 4x4 grid do not. Adding a layout in the UI starts you on a square grid for this reason. Leaving cells empty with `.` costs less than drawing on a grid of the wrong shape, and for some counts it is unavoidable: two 16:9 cameras cannot cover more than half of a 16:9 canvas whatever grid they are drawn on.
 - If more cameras are being shown than the largest drawn layout has slots, the largest layout is used and the cameras that come last are left out, so the largest layout acts as a limit.
 - If there is no layout drawn for the number of cameras being shown, Birdseye lays them out automatically and logs a warning. Draw a layout for every count you expect to see: with `mode: motion` or `mode: objects` the number of cameras being shown changes constantly, so a missing count sends the view back to the automatic layout at exactly the moment the drawn layouts are meant to keep it still.
 - `layout.max_cameras` is ignored, since the largest drawn layout already limits how many cameras are shown.
